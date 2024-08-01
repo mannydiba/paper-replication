@@ -1,0 +1,2147 @@
+---
+title: "Blanchard and Perotti's Paper Replication"
+author: Andrea Bellina, Giorgia Bighi, Mariagrazia Di Bartolomeo, Chiara Gronchi,
+  Martina Pacifico
+date: "2024-07-27"
+output:
+  pdf_document: default
+  html_document: default
+---
+# ABSTRACT 
+
+This study aims to replicate the paper "An Empirical Characterization of the Dynamic Effects of Changes in Government Spending and Taxes on Output" by Olivier Blanchard and Roberto Perotti. Specifically, we will apply their combined structural VAR and event study approach to analyze the dynamic effects of shocks in government spending and taxes on economic activity in the United States. Our replication focuses on the sample period from 1979 to 2024. We utilize institutional information about the tax and transfer systems, as well as the timing of tax collections, to determine the automatic response of taxes and spending to economic activity, thereby identifying fiscal shocks. 
+
+
+# INTRODUCTION 
+
+Olivier Blanchard and Roberto Perotti‘s paper analyzes the dynamic effects of shocks in government spending and taxes on economic activity in the United States during the postwar period. It employs a structural VAR approach that uses institutional information about the tax and transfer systems and the timing of tax collections to identify the automatic response of taxes and spending to economic activity, thereby inferring fiscal shocks.  
+
+We will replicate the study, focusing on U.S. economic activity from 1979 onward.  The decision to use this time period is based on the availability of proper data, which we’ve found starting from 1979. As a result, some of the findings differ due to the different period we are analyzing. 
+
+The authors noted the surprising lack of prior research using this approach: large-scale econometric models estimated dynamic fiscal multipliers, but they often assumed rather than documented the effects of fiscal policy on economic activity. While many reduced-form studies had focused on summary statistics of fiscal policy or had concentrated solely on either spending or taxes, a more comprehensive approach was needed.   
+
+It was done using a VAR approach for two reasons. First one: budget variables move for many reasons, but, often, fiscal shocks are exogenous to output. Second one: fiscal policy decisions and their implementation involve significant lags, meaning that the response of fiscal policy to unexpected movements in economic activity takes time. As a result, there is likely to be little or no immediate discretionary response to such shocks. 
+
+By using institutional information about fiscal systems, we can estimate the automatic effects of unexpected economic activity movements on fiscal variables and identify fiscal policy shocks. Once these shocks are identified, we can analyze their dynamic impact on GDP.  
+
+A methodological twist (a combination of structural VAR with an event study approach) is employed due to the presence of very large discretionary changes in taxes or expenditures, which cannot be treated as outcomes of the same underlying stochastic process. The authors analyze these separately using dummy variables. The impact of these substantial, one-time changes is examined by studying the dynamic response of output to a corresponding dummy variable included in the VAR specification. While the original authors addressed a significant tax cut in 1975 using dummy variables, we aim to similarly analyze the impact of two major fiscal policy events: those related to the COVID-19 pandemic and the 2008 financial crisis.  
+
+
+
+This paper is organized similarly to the original study.  Section 2 presents the main specification and discusses identification. Section 3 introduces the data and examines their main properties. Section 4 explores the contemporaneous relationships between shocks to government spending, net taxes, and output. Section 5 analyzes the dynamic effects of tax shocks, while Section 6 focuses on spending shocks. Section 7 addresses robustness while the last section will discuss the effects of tax and spending shocks with respect to each component of GDP.
+The topic included in section 8 of the original paper won't be discussed because in our data frame we don't consider the 50s, however the dummies will be object of discussion in the previous sections.
+
+The first thing to do is to prepare the data. 
+ 
+```{r library, include=FALSE}
+
+options(repos = c(CRAN = "https://cran.r-project.org"))
+install.packages("fredr")
+
+library(fredr)
+library(xts)
+library(seasonal)
+library(dplyr)
+library(lmtest)
+library(multcomp)
+library(vars)
+library(ggplot2)
+library(gridExtra)
+fredr_set_key('eee3fd7c9c40fd90e7da45fb7e6224ce')
+
+gov_spending_federal <- fredr(series_id = "FGEXPND", observation_start = as.Date("1979-01-01"), observation_end =as.Date("2024-01-01"))
+head(gov_spending_federal)
+#transform into a time series to apply var
+govspend_xts <- xts(gov_spending_federal$value, order.by = as.Date(gov_spending_federal$date))
+head(govspend_xts) 
+length(govspend_xts)
+#Government Consumption Expenditures State and Local
+gov_spending_sl <- fredr(series_id = "SLEXPND", observation_start = as.Date("1979-01-01"), observation_end =as.Date("2024-01-01"))
+head(gov_spending_sl)
+#transform into a time series to apply var
+govspend_sl_xts <- xts(gov_spending_sl$value, order.by = as.Date(gov_spending_sl$date))
+head(govspend_sl_xts) 
+length(govspend_sl_xts)
+
+total_gov_spending=govspend_xts +govspend_sl_xts
+```
+
+# METHODOLOGICAL ISSUES 
+
+Both government spending and taxation impact GDP. Since these two factors are likely interrelated, it is essential to account for both when estimating the effects of either. Therefore, we analyze budget breakdowns using two variables: one for expenditure and one for revenue. 
+
+We define the expenditure variable as the total amount spent on goods and services by the government, which includes both government consumption and government investment. This variable is referred to as "government spending" or simply "spending." 
+
+The revenue variable is defined as total tax revenues minus transfers (which includes interest payments). We refer to this as "net taxes" or just "taxes." 
+
+
+```{r, include=FALSE}
+gov_receipts<- fredr(series_id = "FGRECPT", observation_start = as.Date("1979-01-01"), observation_end =as.Date("2024-01-01"))
+head(gov_receipts)
+g_receipts_clean<-na.omit(gov_receipts)
+head(g_receipts_clean)
+govrecip_xts <- xts(g_receipts_clean$value, order.by = as.Date(g_receipts_clean$date))
+
+state_local_receipts<-fredr(series_id = "W070RC1Q027SBEA", observation_start = as.Date("1979-01-01"), observation_end =as.Date("2024-01-01"))
+head(state_local_receipts)
+state_local_receipts_clean<-na.omit(state_local_receipts)
+head(state_local_receipts_clean)
+state_local_receipts_xts <- xts(state_local_receipts_clean$value, order.by = as.Date(state_local_receipts_clean$date))
+
+
+#Federal-grants-in-aid
+fed_grants_in_aid<-fredr(series_id = "FGSL", observation_start = as.Date("1979-01-01"), observation_end =as.Date("2024-01-01"))
+head(fed_grants_in_aid)
+fed_grants_in_aid_clean<-na.omit(fed_grants_in_aid)
+head(fed_grants_in_aid_clean)
+fed_grants_in_aid_xts <- xts(fed_grants_in_aid_clean$value, order.by = as.Date(fed_grants_in_aid_clean$date))
+
+#Government current transfer payments: Government social benefits: To persons
+#Billions of Dollars,Seasonally Adjusted. Quarterly
+federal_transfer<-fredr(series_id="B087RC1Q027SBEA", observation_start = as.Date("1979-01-01"), observation_end =as.Date("2024-01-01"))
+tail(federal_transfer)
+fedtransfer_xts <- xts(federal_transfer$value, order.by = as.Date(federal_transfer$date))
+
+#State e local transfer
+state_local_transfer<-fredr(series_id="LA0000171Q027SBEA", observation_start = as.Date("1979-01-01"), observation_end =as.Date("2024-01-01"))
+state_local_transfer_xts <- xts(state_local_transfer$value, order.by = as.Date(state_local_transfer$date))
+
+#Interest paid 
+# Government current expenditures: Interest payments(federal)
+#Billions of Dollars,Seasonally Adjusted. Quarterly
+fed_net_int<-fredr(series_id="A091RC1Q027SBEA", observation_start = as.Date("1979-01-01"), observation_end =as.Date("2024-01-01"))
+head(fed_net_int)
+fed_ni_xts<- xts(fed_net_int$value, order.by = as.Date(fed_net_int$date))
+
+state_local_int<-fredr(series_id="Y705RC1Q027SBEA", observation_start = as.Date("1979-01-01"), observation_end =as.Date("2024-01-01"))
+state_local_xts<- xts(state_local_int$value, order.by = as.Date(state_local_int$date))
+
+#Dividend
+dividend<-fredr(series_id="B081RC1Q027SBEA", observation_start = as.Date("1979-01-01"), observation_end =as.Date("2024-01-01"))
+dividend_xts<- xts(dividend$value, order.by = as.Date(state_local_int$date))
+
+net_tax=govrecip_xts+state_local_receipts_xts- fed_grants_in_aid_xts-fedtransfer_xts-state_local_transfer_xts- fed_ni_xts - state_local_xts + dividend_xts
+head(net_tax)
+str(net_tax)
+#DEFENSE SPENDING
+#Government consumption expenditures: Federal: National defense
+#Billions of Dollars,Seasonally Adjusted. Quarterly
+def_spending<-fredr(series_id = "A997RC1Q027SBEA", observation_start = as.Date("1979-01-01"), observation_end =as.Date("2024-01-01"))
+
+def_spending_xts<- xts(def_spending$value, order.by = as.Date(def_spending$date))
+#Real GDP
+#Billions of Dollars,Seasonally Adjusted. Quarterly
+re_gdp<-fredr(series_id = "GDPC1", observation_start = as.Date("1979-01-01"), observation_end =as.Date("2024-01-01"))
+tail(re_gdp)
+real_gdp_xts<- xts(re_gdp$value, order.by = as.Date(re_gdp$date))
+#GDP PRO CAPITE
+real_gdp_pcapita<-fredr(series_id = "A939RX0Q048SBEA",observation_start = as.Date("1979-01-01"), observation_end =as.Date("2024-01-01"))
+real_gdp_pcapita_xts <-  xts(real_gdp_pcapita$value, order.by = as.Date(real_gdp_pcapita$date))
+
+#GDP deflator
+gdp_def<-fredr(series_id="GDPDEF", observation_start = as.Date("1979-01-01"), observation_end =as.Date("2024-01-01"))
+head(gdp_def)
+gdp_def_xts<- xts(gdp_def$value, order.by = as.Date(gdp_def$date))
+length(gdp_def_xts)
+#POPULATION: Thousands, Quarterly.Not adjusted
+#we need to apply seasonality adjustment
+population_data <- fredr(series_id = "B230RC0Q173SBEA", observation_start = as.Date("1979-01-01"))
+# Select date and value
+data <- population_data[, c(1, 3)]
+# Convert the date to a Date object
+data$date <- as.Date(data$date)
+# Create the time series object using the value column
+data_ts <- ts(data$value, start = c(1979, 1), frequency = 4)
+# Perform seasonal adjustment using X-11 method
+seas_adjusted <- seas(data_ts, x11 = "")
+#extract
+adjusted_series <- final(seas_adjusted)
+# Create a data frame with the original date and adjusted values
+adjusted_df <- data.frame(date = data$date, adjusted = as.numeric(adjusted_series/ 1000 / 1000))
+#convert into xts series
+adj_pop_xts <- xts(adjusted_df$adjusted, order.by = adjusted_df$date)
+# Print the first few rows of the xts object
+head(adj_pop_xts)
+population_values <- as.data.frame(adj_pop_xts)
+
+
+#Once we have transformed all the variables in time series, we can apply calculations:use the GDP deflator to express the variables in real terms. This allows us to
+#express the impulse responses as shares of GDP
+real_gov_spend_share=(total_gov_spending/gdp_def_xts)/adj_pop_xts
+real_net_taxes= (net_tax / gdp_def_xts)/adj_pop_xts
+
+real_national_defense=def_spending_xts/gdp_def_xts
+
+length(real_gov_spend_share)
+length(real_net_taxes)
+length(real_gdp_pcapita_xts)
+
+```
+
+
+## 2.1 THE VAR
+
+Our VAR specification is: 
+
+
+
+$$
+Y_t=A(L, q)\mathbf{Y}_{t-1} + \mathbf{U}_t
+$$
+where 
+
+$$
+\mathbf{U}_t = \begin{bmatrix}
+T_t \\
+G_t \\
+X_t
+\end{bmatrix}'
+$$  
+
+is a three-dimensional vector in the logarithms of quarterly taxes, spending, and GDP, all in real, per capita terms. We use GDP deflator to obtain the variables in real terms.   
+
+Population was not seasonally adjusted, so we’ve applied the X-11 method to obtain consistent data and then compute per capita values. 
+
+We use quarterly data for identification of the fiscal shocks. We allow either for deterministic (quadratic trends in logs), or stochastic (unit root with slowly changing drift) trends. We also allow for the presence of a few dummy variables. These issues will be discussed later. 
+
+$$
+\mathbf{U}_t = \begin{bmatrix}
+T_t \\
+G_t \\
+X_t
+\end{bmatrix}'
+$$  
+is the corresponding vector of reduced form residuals, which in general will have non-zero cross correlations. 
+
+The polynomial $A(L,q)$ is a four-quarter distributed lag polynomial, allowing coefficients at each lag to vary depending on the specific quarter hat indexes the dependent variable. This quarter-dependence is necessary due to seasonal patterns in tax responses to economic activity. Some taxes—such as indirect taxes —are paid with minimal delays relative to the transaction time. Conversely, other taxes—like corporate income taxes—are often paid with significant delays, and the timing of these payments can vary depending on the quarter.  For example, consider a tax that is paid in the last quarter of each year based on economic activity over the entire year. In this case, during the last quarter, the tax revenue will be influenced by GDP from the current quarter as well as the previous three quarters. However, in the other three quarters of the year, tax revenue will be zero and will not be affected by GDP.  
+
+## 2.2 IDENTIFICATION 
+
+As in the original paper, the reduced form residuals $x_t$, $g_t$ and $x_t$ from the VAR equation are linear combinations of the underlying "structural" tax, spending, and GDP shocks. We can write: 
+
+$$
+t_t = a_1 x_t + a_2 e^g_t + e^t_t
+$$
+
+$$
+g_t = b_1 x_t + b_2 e^t_t + e^g_t
+$$
+
+$$
+x_t = c_1 t_t + c_2 g_t + e_x^t
+$$
+
+where $e_t^t$, $e_t^g$, and $e_x^t$ are the mutually uncorrelated structural shocks that we want to recover. 
+
+These equations can be interpreted as follows.  
+
+The first equation suggests that unexpected changes in taxes within a given quarter, $t_t$ can be attributed to one of three factors: the reaction to unexpected fluctuations in GDP, represented by $a_1x_t$  ; the response to structural shocks in government spending, given by  $a_1e_t$ ; and the response to structural shocks specific to taxes, captured by $a_2e_t$.  
+
+The second equation can be interpreted similarly to the first, the key difference is that it addresses unexpected movements in spending instead of taxes. 
+
+Unexpected changes in output are explained in the third equation. They can result from unexpected changes in taxes, unexpected changes in spending, or from other unforeseen shocks, denoted as $e^x_t$. 
+
+Our approach involves three key steps: 
+
+We use institutional information about tax, transfer, and spending programs to determine the parameters $a_1$  and $b_1$ . These coefficients generally reflect two different effects of economic activity on taxes and spending: the automatic effects under current fiscal policy rules and any discretionary adjustments made in response to unexpected events within the quarter. Using quarterly data allow us to eliminate the second channel (so focusing only on adjustments related to unexpected events) since there are evidence that suggest policymakers and legislators takes more than a quarter to recognize a GDP shock, determine the appropriate fiscal measures, get these measures approved, and implement them. This timeline would be shorter if we were using annual data, as fiscal policy could be adjusted within the year in response to unexpected GDP changes. 
+
+Therefore, to estimate $a_1$  and $b_1$ , we focus on calculating the elasticities of government spending and net taxes with respect to output. We derive these elasticities based on the characteristics of the spending and tax/transfer systems.  
+
+We assume $b_1 = 0$, based on the assumption that there is no automatic feedback from economic activity to government purchases of goods and services, as stated in the paper. 
+
+ 
+
+About net taxes: we represent the level of net taxes, $$\tilde{T}$$, as $\tilde{T} = \sum \tilde{T}_i$, while  $B_i$ denote the tax base corresponding to tax $\tilde{T}_i$
+. We can then express the within-quarter elasticity of net taxes with respect to output, $a_1$ , as follows: 
+
+$$
+a_1 = \sum_{i} \eta_{\tilde{T}_i, B_i} \eta_{B_i, X} \frac{\tilde{T}_i}{\tilde{T}}
+$$
+
+where $\eta_{{T}_i, B_i}$  represents the elasticity of taxes of type $i$ with respect to their tax base, and $\eta_{B_i, X}$  denotes the elasticity of the tax base with respect to GDP. 
+
+To determine these elasticities, we rely on the work by the OECD (Price et al. [2015]). The original paper uses the work by Giorno et al. [1995]. Both studies calculate output elasticities for four categories of taxes (direct taxes on individuals, corporate income taxes, social security taxes, and indirect taxes) using the formula above. However, Price et al. [2015] provides updated estimates and methodologies, offering a more current and relevant basis for our analysis. Nevertheless, the OECD estimates are based on annual changes, whereas we need to adapt these estimates for quarterly changes. One of the reasons is related to collection lags (the delay between the time an economic activity occurs and the time the government collects the associated taxes). 
+
+Once we’ve calculated the elasticities for each tax category and assumed they are constant over time, we’ve multiplied these elasticities by the respective ratios of each category to net taxes. So, the value of a1 varies over time due to the changes in the ratio: on average, its value is $4.07$ over the $1979:1-2024:1$ period. 
+
+Using these estimates of $a_1$  and $b_1$ , we can construct the cyclically adjusted reduced-form tax and spending residuals,  $t'_t = t_t - a_1 x_t$  and $g'_t=g_t-b_1x_t$ (since $b_1 =0$). Although $t'_t$ and $g'_t$ may still be correlated with each other, they are no longer correlated with $e^x_t$. Therefore, we can use them as instruments to estimate $c_1$  and $c_2$  in a regression of $x_t$  on $t_t$ and $g_t$. By examining the p-values, we find that they are very small for each component, indicating that they are significant in explaining $x_t$ . Therefore, we can use the coefficients as reliable estimates. The estimated coefficients are $-1.01106$ for $c_1$(meaning that a unit positive tax shock will reduce the gdp by 1.01) and $0.5321601$ for $c_2$ (a unit positive spending shock will increase the GDP by 0.53). 
+
+ 
+
+This leaves only two coefficients to estimate, $a_2$  and $b_2$ . It is challenging to identify these coefficients solely from the correlation between $t_t$ and $g_t$. When the government increases both taxes and spending simultaneously, it is difficult to determine whether taxes are responding to an increase in spending $a_2=0$, $b_2 =0$) or vice versa. Therefore, we adopt an agnostic approach, following the methodology of the original paper. We identify the model under two alternative assumptions: first, we assume that tax decisions come first, setting $a_2 =0$ and estimating $b_2$ ; second, we assume that spending decisions come first, setting $b_2 =0$ and estimating $a_2$ . 
+
+## 2.3 IMPULSE RESPONSES 
+
+Having identified the tax and spending shocks, we can analyze their effects on GDP. Due to quarter dependence, the impacts of fiscal policy can vary depending on the quarter in which the shock occurs. Instead of deriving four separate impulse responses for each quarter where the initial shock happens, we adopt a simpler approach as done in the original paper. We use a quarter-dependent VAR (Vector Autoregression) to estimate the covariance matrix and the coefficients in equation (2), capturing the contemporaneous effects of fiscal shocks.  Then, we use a VAR estimated without quarter dependence (except for additive seasonality) to characterize the dynamic effects of the shocks. This method has been used to get an average dynamic response to fiscal shocks, though in a loose sense. 
+
+An important point to note is that, since we use logarithmic transformations and encountered some negative values in our dataset (which cannot be transformed logarithmically), We replaced these negative values with a very small constant. This adjustment was made because there were only a few such values, which represent an insignificant portion of the dataset. 
+
+We have analyzed the impulse responses of GDP, spending, and taxes to a tax shock, both when taxes are ordered first ($a_2 = 0$) and when they are ordered second ($b_2 = 0$). The same analysis is conducted for a spending shock: we analyze the impulse responses of the three variables to a shock in spending. 
+
+Given the hypotheses above, the VAR method is particularly useful as it allows us to consider a variety of scenarios and examine their effects. 
+
+# ELASTICITIES 
+
+As in original paper, to calculate the overall net tax elasticity with respect to GDP  $a_1$, we analyze four different types of taxes: indirect taxes $(IND)$, personal income taxes $(INC)$, corporate income taxes $(BUS)$, and social security taxes $(SS)$. For each type, we determine its elasticity to GDP $(X)$ by multiplying two factors: the elasticity of the tax revenue relative to its own tax base, and the elasticity of that tax base with respect to GDP. Additionally, for each tax category, we need to account for factors such as collection lags, which are delays between when economic activity occurs and when taxes are collected, and quarter dependence, which involves seasonal variations and quarterly patterns in tax revenues. 
+
+In examining expenditures, we estimate the output elasticity of total transfers using approximations. 
+
+```{r, include=FALSE}
+employment_data <- fredr(series_id="PAYEMS", observation_start = as.Date("1979-01-01"))
+employment<-data.frame(date=employment_data$date, emp.data=employment_data$value)
+head(employment)
+employment_quarterly <- subset(employment, as.numeric(format(date, "%m")) %% 3 == 1)
+
+earnings_data<-fredr(series_id="LES1252881600Q")
+earnings<-data.frame(date=earnings_data$date, earn.data=earnings_data$value)
+head(earnings)
+
+gdp<-data.frame(date=re_gdp$date, gdp_data=re_gdp$value)
+
+data <- merge(earnings, employment_quarterly, by = "date")
+data <- merge(data, gdp, by = "date")
+
+data <- data %>%
+  mutate(
+    log_change_wages = c(NA, diff(log(earn.data))),
+    log_change_employment = c(NA, diff(log(emp.data))),
+    log_change_gdp = c(NA, diff(log(gdp_data)))
+  )
+
+data_clean <- na.omit(data )
+
+model_F <- lm(log_change_wages ~ log_change_employment + lag(log_change_employment, 1) + lag(log_change_employment, 2) + 
+                lag(log_change_employment, 3) + lag(log_change_employment, 4) + lead(log_change_employment, 1), data = data_clean)
+summary(model_F)
+F <- coef(model_F)["log_change_employment"]
+
+model_H <- lm(log_change_employment ~ log_change_gdp + lag(log_change_gdp, 1) + lag(log_change_gdp, 2) + 
+                lag(log_change_gdp, 3) + lag(log_change_gdp, 4) + lead(log_change_gdp, 1), data = data)
+summary(model_H)
+
+H <- coef(model_H)["log_change_gdp"]
+
+D <- 1.65 
+
+tau_BINC_X <- (H / (F + 1))
+tau_INC_BINC <- (F * D + 1) / (F + 1)
+tau_BINC_X
+tau_INC_BINC
+
+#SOCIAL SECUITY TAXES: F and H are the same, the difference is about D
+D1<-0.85 
+
+# Calculating the elasticities
+tau_BSST_X <- (H / (F + 1))
+tau_SST_BINC <- (F * D1 + 1) / (F + 1)
+
+# Print the results
+tau_BSST_X 
+tau_SST_BINC
+```
+
+
+
+```{r, include=FALSE}
+#INDIRECT TAXES
+#We take the tax base to be GDP: so the elasticity to the tax base will be one
+tau_BIND_X<-1
+tau_IND_BIND<-1.00 #from https://www.oecd-ilibrary.org/economics/adjusting-fiscal-balances-for-the-business-cycle_5jrp1g3282d7-en
+
+
+#CORPORATE INCOME TAXES
+#The phase-out of penalties for estimates based on the previous year's liability has been implemented. Now, more stringent requirements ensure corporations estimate their taxes accurately
+
+profits_data <- fredr(series_id = "A446RC1Q027SBEA", observation_start = as.Date("1979-01-01"))
+profits <- data.frame(date = profits_data$date, profits.value = profits_data$value)
+head(profits)
+
+taxes_recipts <- fredr(series_id = "W025RC1Q027SBEA", observation_start = as.Date("1979-01-01"))
+taxes_recip<- data.frame(date = taxes_recipts$date, taxes.value = taxes_recipts$value)
+head(taxes_recip)
+
+data_corporate <- merge(profits, taxes_recip, by = "date")
+data_corporate <- merge(data_corporate, gdp, by = "date")
+
+data_corporate <- data_corporate %>%
+  mutate(
+    log_change_profits = c(NA, diff(log(profits.value))),
+    log_change_gdp = c(NA, diff(log(gdp_data))),
+    log_change_taxes_receip = c(NA, diff(log(taxes.value)))
+  )
+
+data_corporate <- na.omit(data_corporate)
+
+print(head(data_corporate))
+
+#Elasticity of corporate profits to output
+# Esegui la regressione delle variazioni dei profitti aziendali sul PIL
+model_profits <- lm(log_change_profits ~ lag(log_change_gdp, 0) + lag(log_change_gdp, 1) + lag(log_change_gdp, 2) + lag(log_change_gdp, 3) + lag(log_change_gdp, 4) + lead(log_change_gdp, 1), data = data_corporate)
+summary(model_profits)
+
+tau_BCP_X= coef(model_profits)["lag(log_change_gdp, 0)"]
+tau_BCP_X
+
+#Elasticity of corp income taxes to corporate profits
+
+#we estimate it from a regression of tax receipts on the first four lags of tax accruals, 
+#allowing for a different coefficient when the dependent variable is measured in the second quarter, and constraining the coefficients
+#on the first four lags to be the same. Our value is this constrained coefficient on the first four lags
+#Dummy variable for second quarter
+data_corporate <- data_corporate %>%
+  mutate(second_quarter = ifelse(format(date, "%m") == "07", 1, 0))
+# Interaction terms for second quarter
+data_corporate <- data_corporate %>%
+  mutate(
+    second_quarter_lag1 = second_quarter * lag(log_change_profits, 1),
+    second_quarter_lag2 = second_quarter * lag(log_change_profits, 2),
+    second_quarter_lag3 = second_quarter * lag(log_change_profits, 3),
+    second_quarter_lag4 = second_quarter * lag(log_change_profits, 4)
+  )%>%
+  na.omit()
+
+
+reg_tax_receipts <- lm(log_change_taxes_receip~ lag(log_change_profits, 1) + lag(log_change_profits, 2) + lag(log_change_profits, 3) + lag(log_change_profits, 4) + second_quarter_lag1 + second_quarter_lag2 + second_quarter_lag3 + second_quarter_lag4, data = data_corporate)
+summary(reg_tax_receipts)
+
+# Constrain the coefficients on the first four lags to be equal
+  
+hypothesis_matrix <- rbind(
+  "lag1 = lag2" = c(1, -1, 0, 0, 0, 0, 0, 0, 0),
+  "lag1 = lag3" = c(1, 0, -1, 0, 0, 0, 0, 0, 0),
+  "lag1 = lag4" = c(1, 0, 0, -1, 0, 0, 0, 0, 0),
+  "sq_lag1 = sq_lag2" = c(0, 0, 0, 0, 1, -1, 0, 0, 0),
+  "sq_lag1 = sq_lag3" = c(0, 0, 0, 0, 1, 0, -1, 0, 0),
+  "sq_lag1 = sq_lag4" = c(0, 0, 0, 0, 1, 0, 0, -1, 0)
+)
+
+# Perform the general linear hypothesis test
+library(multcomp)
+test <- glht(reg_tax_receipts, linfct = hypothesis_matrix)
+summary(test)
+
+#p-values (greater than 0.05) in this context support the validity of your constraints. 
+#They indicate that the data do not provide strong evidence against the assumption that the coefficients are equal.
+
+coefficients <- coef(reg_tax_receipts)
+lag_coefficients <- coefficients[c("lag(log_change_profits, 1)", "lag(log_change_profits, 2)", "lag(log_change_profits, 3)", "lag(log_change_profits, 4)")]
+tau_CIT_BCP <- mean(lag_coefficients)
+tau_CIT_BCP
+
+#TRANSFERS: dato che anche oggi il valore dell'annual GDP elasticity estimated by the
+#OECD for total current expenditur e is still -0.1, we use the estimation of the paper -0.2
+
+tau_TR_X<- -0.2
+
+# 2.2
+
+#PERSONAL INCOME TAX(direct taxes on individuals):sate and government+federal
+personal_taxes1=fredr(series_id = 'A074RC1Q027SBEA', observation_start = as.Date("1979-01-01"), observation_end= as.Date("2024-01-01"))
+personal_taxes1_df <- data.frame(
+  date = as.Date(personal_taxes1$date),
+  value = as.numeric(personal_taxes1$value)
+)
+tail(personal_taxes1_df)
+personal_taxes2=fredr(series_id = 'B245RC1Q027SBEA', observation_start = as.Date("1979-01-01"), observation_end= as.Date("2024-01-01"))
+personal_taxes2_df <- data.frame(
+  date = as.Date(personal_taxes2$date),
+  value = as.numeric(personal_taxes2$value)
+)
+tot_pt= personal_taxes1_df$value+personal_taxes2_df$value
+length(tot_pt)
+#CORP INCOME TAX
+corporate_taxes= as.numeric(taxes_recipts$value)
+
+#SOCIAL SECURITY TAX
+soc_sec_taxes=fredr(series_id = 'W823RC1Q027SBEA', observation_start = as.Date("1979-01-01"), observation_end= as.Date("2024-01-01"))
+
+str(soc_sec_taxes)
+#INDIRECT TAX:This category includes taxes on goods and services that are either produced within the country or imported from abroad. 
+#It is part of the broader category of indirect taxes.
+indirect_taxes=fredr(series_id = 'B234RC1Q027SBEA', observation_start = as.Date("1979-01-01"), observation_end= as.Date("2024-01-01"))
+
+#TRANSFERS
+total_transfers= as.data.frame(fedtransfer_xts + state_local_transfer_xts)
+
+library(tidyverse)
+taxes_df <- data.frame(
+  date = as.Date(soc_sec_taxes$date),
+  per_tax_value = as.numeric(tot_pt),
+  soc_sec_value = as.numeric(soc_sec_taxes$value),
+  indirect_tax_value = as.numeric(indirect_taxes$value),
+  corporate_taxes_value=corporate_taxes,
+  tot_transfer_value= as.numeric(total_transfers$V1)
+)
+
+
+taxes_df <- na.omit(taxes_df)
+
+taxes_df <- taxes_df %>%
+  mutate(quarter = as.yearqtr(date))
+aggregated_taxes <- taxes_df %>%
+  group_by(quarter) %>%
+  summarize(
+    total_taxes = sum(per_tax_value, na.rm = TRUE) +
+      sum(soc_sec_value, na.rm = TRUE) +
+      sum(indirect_tax_value, na.rm = TRUE) +
+      sum(corporate_taxes_value, na.rm = TRUE) -
+      sum(tot_transfer_value, na.rm = TRUE))
+
+taxes_df <- taxes_df %>%
+    left_join(aggregated_taxes, by = "quarter")
+    
+taxes_df <- taxes_df %>%
+  mutate(
+    per_tax_value = (per_tax_value / total_taxes),
+    soc_sec_value = (soc_sec_value / total_taxes),
+    indirect_tax_value = (indirect_tax_value / total_taxes),
+    corporate_taxes_value = (corporate_taxes_value / total_taxes),
+    tot_transfer_value = (tot_transfer_value / total_taxes)
+  )
+
+
+# Print the resulting dataframe
+
+tail(taxes_df)
+elasticity_matrix<-data.frame(
+col1 = c(tau_BINC_X,tau_INC_BINC),
+col2 = c(tau_BSST_X,tau_SST_BINC),
+col3 = c(tau_BIND_X, tau_IND_BIND),
+col4 = c(tau_BCP_X, tau_CIT_BCP),
+col5 = c (tau_TR_X,1)
+)
+
+result <- as.data.frame(matrix(NA, nrow = nrow(taxes_df), ncol = ncol(elasticity_matrix)))
+
+colnames(result) <- colnames(elasticity_matrix)
+
+
+ratio_columns <- c("per_tax_value", "soc_sec_value", "indirect_tax_value", "corporate_taxes_value", "tot_transfer_value")
+
+for (i in 1:length(ratio_columns)) {
+    # Ottieni la colonna di elasticità corrispondente
+    elasticity_col <- elasticity_matrix[, i]
+    
+   
+    ratio_col <- ratio_columns[i]
+    
+   
+    result[, i] <- as.numeric(taxes_df[[ratio_col]] * elasticity_col[1] * elasticity_col[2])
+}
+
+print(result)
+nrow=nrow(result)
+a1 <- as.data.frame(matrix(NA, nrow = nrow(result), ncol = 1))
+for (i in 1:nrow){
+  a1[i,] = as.numeric(sum(result[i,]))
+}
+print(a1)
+print(mean(a1[,1]))
+
+
+trimestri <- seq(as.Date("1979-01-01"), as.Date("2024-01-01"), by = "quarter")
+
+tt <- numeric(length(trimestri))
+t1t <- numeric(length(trimestri))
+xt <- numeric(length(trimestri))
+
+p_tax=as.numeric(tot_pt)
+c_tax=as.numeric(corporate_taxes)
+ss_tax=as.numeric(soc_sec_taxes$value)
+ind_tax=as.numeric(indirect_taxes$value)
+rgdp=as.numeric(re_gdp$value)
+
+for (i in seq_along(trimestri)) {
+  # Esempio di calcolo di tt 
+  tt[i]= p_tax[i]+c_tax[i]+ss_tax[i]+ind_tax[i]
+  t1t[i] <- tt[i] - (a1[i,] * rgdp[i])
+
+}
+
+t1t <- unlist(t1t)
+str(t1t)
+g1t<-as.numeric(total_gov_spending)
+ 
+
+model_final <- lm(rgdp ~ t1t + g1t)
+summary(model_final)
+#very significative
+coefficients <- model_final$coefficients
+c1 <- coefficients[2]   
+c2 <- coefficients[3]
+print(c1)
+print(c2)
+
+#RECOVER A2 AND B2
+#First assumption
+b2=0
+egt=g1t
+model1 <- lm(tt ~ rgdp + egt)
+a2 <- coef(model1)["egt"]  
+a2
+
+#Second assumption
+a2=0
+ett=t1t
+model2 <- lm(g1t ~ rgdp + ett)
+b2 <- coef(model2)["ett"] 
+b2
+
+#compute the last uncorrelated structural shock 
+ext=rgdp-(c1*tt)-(c2*g1t)
+
+#control the number of shocks are equal
+length(ext)
+length(egt)
+length(ett)
+
+
+```
+
+
+## Indirect Taxes
+
+As in “An Empirical Characterization of the Dynamic Effects of changes in Government spending and Taxes on Output”, for indirect taxes we assume that the tax base is equivalent to GDP. This is a simplification because in many states some items are excluded from the tax base, such as food. We set the elasticity of the indirect tax base to GDP  to 1.0. This means we assume the tax base moves in perfect proportion with GDP. Similarly, the elasticity of indirect taxes relative to their tax base is also set to 1.0, based on estimates from Price et al. [2015]. 
+
+## Personal Income Taxes
+
+We rely on formulas and steps provided in the original paper to estimate the elasticity of personal income taxes.  
+
+Let $T=t(W)W(E)E(X)$, where $T$ is total revenues from personal income taxes, $t$ is the tax rate, $W$ is wages (or earnings), $E$ is employment, and $X$ is GDP. We define the tax base as $B_INC=W*E$. 
+
+Assuming constant elasticities, we have: 
+
+The elasticity of taxes to earnings: $D=dlog(tW)/dlog(W)$ 
+
+The elasticity of earnings to employment: $F=dlogW/dlogE$ 
+
+The elasticity of employment to output: $H=dlogE/dlogY$ 
+
+By totally differentiating the expression for total tax revenues, we get: 
+$$
+\eta_{B_{\text{INC}},X} = \frac{H}{(F+1)}
+$$
+
+$$
+\eta_{\text{INC},B_{\text{INC}}} = \frac{(FD+1)}{(F+1)}
+$$ 
+
+
+$F$ is estimated by running a regression of the log change in the wages of production workers on the first lead and lags 0 to 4 of the log change in employment of production workers.  Working on $F$, we found that employment data is only available from the first quarter of 1979. Consequently, we have focused our analysis on a sample starting from this period onward.
+
+Similarly, we estimate $H$ by regressing the log change in employment of production workers on the first lead and lags 0 to 4 of the log change in output. The values of $H$ and $F$ obtained from the estimated coefficients of lag zero of the dependent variable. We find $F$ = -0.42 and $H$ = 1.002 
+As Perotti and Blanchard, we assume that the elasticity of personal income taxes is the same for both employees and self-employed individuals.  Actually: 
+
+For employees: their taxes are withheld directly from their wages by their employers. 
+
+For self-employed: they make quarterly tax payments based on their estimated income for each quarter. 
+
+ 
+
+The assumption is based on the idea that there should be no systematic pattern in the year-end tax adjustments if the tax system is well designed. This means that any differences between estimated quarterly payments and actual income should balance out over time. Because of this balance, the assumption of a uniform elasticity does not introduce a significant bias in the calculation of the overall elasticity of personal income taxes to GDP. 
+
+## Social Security Taxes
+
+We follow the same procedure as for personal income taxes. The only difference is in the value of the elasticity of taxes to earnings, D obtained from Price et al. [2015]. 
+
+## Corporate Income Taxes 
+
+Corporations can choose their fiscal year, which may not coincide with the calendar year. 
+
+They are required to make quarterly estimated tax payments. The amount paid must be at least 80% of the final tax liability to avoid penalties, though this requirement can be met based on the previous year's tax liability. The IRS imposes penalties for underpayment of estimated taxes. By ensuring that at least 80% of the final tax liability (or 100% of the previous year’s liability) is paid through quarterly installments, corporations can avoid these penalties. At the end of the fiscal year, corporations must file an annual tax return (Form 1120) with the IRS, detailing their income, deductions, credits, and the resulting tax liability. 
+
+$nB_{INC,X}$: we estimate the immediate (lag 0) coefficient by running a regression of quarterly changes in corporate profits on the first lead and the lags (0 to 4 quarters) of changes in output. 
+
+$nINC,B_{INC}$ (the elasticity of corporate taxes with respect to their base):  we estimate the quarterly elasticity by running a regression of tax receipts on the first four lags of tax accruals. We allow for a different coefficient when the dependent variable is measured in the second quarter but constrain the coefficients on the first four lags to be the same. Our value for BUS,BBUS is this constrained coefficient on the first four lags. 
+
+Performing a general linear hypothesis test, we get p-values (greater than 0.05) in this context support the validity of constraints. They indicate that the data do not provide strong evidence against the assumption that the coefficients are equal. Therefore, we obtain the elasticity by averaging the four coefficients, as the test supports the hypothesis that they are different. 
+
+In the end, we get a value of $0.12$. 
+
+## Transfer
+
+For transfers, we use the same elasticity estimated in the original paper, which is $-0.2$. This elasticity was derived from the annual GDP elasticity of total current expenditure estimated by the OECD, which was $-0.1$. Since in the updated estimates of annual elasticities (Price et al [2015]) the reference value has remained unchanged (i.e., still $-0.1$), we assume that the quarterly elasticity of transfers has remained constant and equal to the value estimated in Blanchard's paper (i.e, $- 0.2$).   
+
+## 2.3 DISCUSSION
+
+In our approach, we assume that economic activity does not influence policy decisions, except for the automatic adjustments inherent in the tax code and transfer system. It differs from some studies on monetary policy, where identification is achieved by assuming that private sector variables, such as GDP and interest rates, do not respond to policy changes immediately. 
+
+An additional assumption in constructing a1 is that the relationship between different tax bases and GDP remains constant regardless of the type of shocks affecting output. Blanchard and Perotti conduct their analysis under this assumption and note that it is likely reasonable for broad-based taxes, such as income taxes. However, this assumption is more questionable for taxes on corporate profits, as the relationship between corporate profits and GDP may vary depending on the nature of the shocks affecting GDP. 
+
+
+
+## 3. DATA
+
+Our data is downloaded from the FRED website, which provides access to data series from various sources. Since the original paper used data from the Bureau of Economic Analysis, we referred to the data series sourced from the latter. 
+
+All the data are quarterly and seasonally adjusted, including both the federal and the state and local values. 
+
+We define net taxes as defined in the paper: the sum of receipts and dividend received by government (only for state and local ones) minus the transfers payments to persons and net interest paid. 
+
+We define government spending as the sum of current expenditures. 
+
+## 3.1 High-frequency properties 
+
+We take the ratio of government spending (including purchases of goods and services) and net taxes (taxes minus transfers) relative to GDP over the extended sample period from 1979:1 to 2024:1 and plot it in two graphs. The data clearly reveals several very large quarterly fluctuations in both taxes and spending. The analysis of the logarithmic differences in taxes and government spending relative to GDP allows us to identify the most significant variations in these ratios, providing a basis for an in-depth analysis of fiscal dynamics relative to GDP. 
+
+The top six largest variations are associated with the years 2020 and 2021, while the seventh is related to the first quarter of 2009. These changes clearly reflect two exceptional events: the Covid-19 pandemic and the 2008 financial crisis. Given that extraordinary events like these ones are followed by equally extraordinary fiscal measures, we have decided to study and trace their effects using dummy variables. The reason is that such significant variations cannot be considered the result of the same stochastic process as the other variations observed in different quarters. By including dummy variables, we aim to isolate and analyze the impacts of these exceptional fiscal events. 
+
+We’ve considered the largest quarterly variations for each event and introduced dummy variables for those. So, the Covid’s dummy is related to the $2020:2$ quarter while the 2008 crisis ' is the one related to the $2009:1$ quarter.  
+
+```{r, include= FALSE}
+# Calculate the ratios
+data$tax_to_gdp <- net_tax  / real_gdp_xts
+data$spend_to_gdp <- total_gov_spending / real_gdp_xts
+
+length(data$spend_to_gdp)
+# Check the first few rows of the data frame
+
+head(data)
+plot_taxes <- ggplot(data, aes(x = date, y = tax_to_gdp)) +
+  geom_line(color = "blue") +
+  labs(title = "Net Taxes to GDP Ratio (1979:1 to 2024:1)",
+       x = "Year",
+       y = "Ratio") +
+  theme_minimal()
+
+# Create the plot for the ratio of government spending to GDP
+plot_spending <- ggplot(data, aes(x = date, y = spend_to_gdp)) +
+  geom_line(color = "red") +
+  labs(title = "Government Spending to GDP Ratio (1979:1 to 2024:1)",
+       x = "Year",
+       y = "Ratio") +
+  theme_minimal()
+```
+
+
+```{r}
+
+grid.arrange(plot_taxes, plot_spending, ncol = 1)
+```
+
+
+```{r, include=FALSE}
+
+#TABLE
+
+library(dplyr)
+
+
+data <- data %>%
+  mutate(
+    tax_to_gdp_adjusted = tax_to_gdp + abs(min(tax_to_gdp)),
+    spend_to_gdp_adjusted = spend_to_gdp + abs(min(spend_to_gdp))
+  )
+
+
+
+# Calculate the log differences
+data <- data %>%
+  mutate(
+    log_diff_tax_to_gdp = c(diff(log(tax_to_gdp_adjusted))),
+    log_diff_spend_to_gdp = c(diff(log(spend_to_gdp_adjusted)))
+  )
+
+
+library(knitr)
+library(zoo)
+library(grid)
+# Select the relevant columns
+table_data <- dplyr::select(data, date, log_diff_tax_to_gdp, log_diff_spend_to_gdp)
+
+# Create the table
+kable(table_data, caption = "Log Differences of Ratios of Government Spending and Net Taxes to GDP")
+
+
+data$log_diff_tax_to_gdp <- abs(data$log_diff_tax_to_gdp)
+data$log_diff_spend_to_gdp<- abs(data$log_diff_spend_to_gdp)
+
+
+data <- data[order(-data$log_diff_tax_to_gdp, -data$log_diff_spend_to_gdp), ]
+
+
+top_diffs <- head(data[,7:8], 7)
+
+table_plot <- tableGrob(top_diffs)
+
+grid.newpage()
+
+# Add the title
+grid.text("Figure1: Large Changes Table", 
+          x = 0.5, y = 0.95, 
+          gp = gpar(fontsize = 16, fontface = "bold"))
+
+```
+
+
+
+```{r}
+
+# Draw the table below the title
+grid.draw(table_plot)
+```
+
+
+```{r, include=FALSE}
+observation_start <- as.Date("1979-01-01")
+observation_end <- as.Date("2024-01-01")
+
+# Create a sequence of quarterly dates
+dates <- seq(from = observation_start, to = observation_end, by = "quarter")
+
+data <- data.frame(
+  date = dates,
+  taxes = real_net_taxes,       
+  spending = real_gov_spend_share,     
+  gdp = real_gdp_pcapita_xts     
+)
+
+colnames(data) <- c("date", "taxes", "spending", "gdp")
+#Se i valori negativi sono pochi e non rappresentano una parte significativa del tuo dataset, puoi sostituirli con una costante molto piccola.
+# Sostituire i valori negativi con una costante piccola
+data$taxes[data$taxes < 0] <- 1e-6
+data$spending[data$spending < 0] <- 1e-6
+# Remove rows with NA values
+data=na.omit(data)
+#Transform in a time series
+ts_data <- ts(data[, c("taxes", "spending", "gdp")], start = c(1979, 1), frequency = 4)
+ts_data <- na.omit(ts_data)
+
+ts_data_log <- log(ts_data)
+# Estimate the VAR model with quarter dependence 
+var_model <- VAR(ts_data_log, p = 2, type = "const")
+summary(var_model)
+
+# Estimate the VAR without quarter dependence
+var_ind <- VAR(ts_data_log, p = 2, type = "trend")
+summary(var_ind)
+
+
+# Calculate impulse responses for quarter-dependent VAR(DT)
+
+irf_vard_a2_0 <- irf(var_model, impulse = "taxes", response = c("gdp", "spending", "taxes"), n.ahead = 20, ortho = FALSE, cumulative = FALSE)
+
+irf_vard_b2_0 <- irf(var_model, impulse = "taxes", response = c("gdp", "spending", "taxes"), n.ahead = 20, ortho = TRUE, cumulative = FALSE)
+
+
+# Calculate impulse responses for VAR without quarter dependence(ST)
+irf_var_a2_0 <- irf(var_ind, impulse = "spending", response = c("gdp", "spending", "taxes"), n.ahead = 20, ortho = FALSE, cumulative = FALSE)
+
+irf_var_b2_0 <- irf(var_ind, impulse = "spending", response = c("gdp", "spending", "taxes"), n.ahead = 20, ortho = TRUE, cumulative = FALSE)
+
+```
+
+```{r}
+plot(irf_vard_a2_0)
+plot(irf_vard_b2_0)
+
+plot(irf_var_a2_0)
+plot(irf_var_b2_0)
+```
+
+
+## 3.2 Lower Frequency Properties
+
+From the first graphs above, we can clearly observe low-frequency movements in both spending and taxes. The main practical issue, for our purposes, is how to treat these low-frequency movements in our two fiscal series in relation to output. In order to do so, we have conducted a battery of integration tests for T, C and X, formal tests such as Augmented Dickey-Fuller and Phiffips-Perron, with a deterministic time trend.
+These tests however do not state with certainty whether we should assume stochastic or deterministic trends for each variable. Because of that, we also performed a battery of cointegration tests between logarithms of taxes an spending and one obvious candidate for a cointegration relation is the difference between taxes and spending, T – C, with T
+including interest payments.
+
+The Figures displays the logarithm of the tax/spending ratio. Again, formal test results do not speak strongly: one can typically reject the null of a unit root at about the 5% level, but no lower.
+Subsequently, we estimate our VARs under two alternative assumptions. In the first, we
+formalize trends in all three variables as deterministic, and allow for linear and
+quadratic terms in time in each of the equations of the VAR. In the second, we allow for three stochastic trends. We then take first-differences of each variable, and, to accountfor changes in the underlying drift terms, we subtract a changing mean, constructed asthe geometric average of past first differences, with decay parameter equal to 2.5 percent per quarter.
+```{r, include=FALSE}
+library(urca)    # for ADF and PP tests
+library(tseries) # for additional tests like KPSS
+
+taxes <- data[, "taxes"]
+gov_spend <-data[, "spending"]
+x<-data[, "gdp"]
+
+# ADF test for T
+adf_test_T <- ur.df(taxes, type = "trend", selectlags = "AIC")
+summary(adf_test_T)
+
+# ADF test for C
+adf_test_G <- ur.df(gov_spend, type = "trend", selectlags = "AIC")
+summary(adf_test_G)
+
+# ADF test for X
+adf_test_X <- ur.df(x, type = "trend", selectlags = "AIC")
+summary(adf_test_X)
+
+# PP test for T
+pp_test_T <- ur.pp(taxes, type = "Z-alpha", model = "constant")
+summary(pp_test_T)
+
+# PP test for C
+pp_test_G <- ur.pp(gov_spend, type = "Z-alpha", model = "constant")
+summary(pp_test_G)
+
+# PP test for X
+pp_test_X <- ur.pp(x, type = "Z-alpha", model = "constant")
+summary(pp_test_X)
+#An example of Cointegration test(using gross taxes): the johansen_test 
+T=govrecip_xts+state_local_receipts_xts- fed_grants_in_aid_xts-fedtransfer_xts-state_local_transfer_xts+ dividend_xts
+T_real=as.data.frame(log(T/gdp_def_xts))
+T_for_test=T_real[,1]
+length(T_for_test)
+library(urca)
+
+data_matrix <- cbind(T_for_test, gov_spend, x)
+
+length(gov_spend)
+johansen_test <- ca.jo(data_matrix, type = "trace", K = 2, ecdet = "trend")
+summary(johansen_test)
+
+#Deficit: the sustainability of fiscal policy
+def=T- total_gov_spending
+new_row <- data.frame(
+  date = dates,
+  deficit = def
+)
+
+plot( new_row, type = "l", col = "blue", lwd = 1,
+     main = "Figure 2:log(tax)-log(gcn)",
+     xlab = "Date", ylab = "Deficit",
+     
+     ) 
+```
+
+```{r}
+summary(adf_test_T)
+
+summary(adf_test_G)
+
+summary(adf_test_X)
+
+summary(pp_test_T)
+
+summary(pp_test_G)
+
+summary(pp_test_X)
+
+plot( new_row, type = "l", col = "blue", lwd = 1,
+     main = "Figure 2:log(tax)-log(gcn)",
+     xlab = "Date", ylab = "Deficit",
+     
+     ) 
+```
+
+```{r, include=FALSE}
+#VAR 
+library(states)
+library(svars)
+head(ts_data_log)
+
+
+var_model1 <- VAR(ts_data_log, p = 2, type = "const")
+summary(var_model1)
+
+var_model2 <- VAR(ts_data_log, p = 2, type = "trend")
+summary(var_model2)
+
+# Structural identification using Cholesky decomposition DT
+svar_model <- id.chol(var_model1, order = c("gdp","taxes", "spending"))
+summary(svar_model)
+
+#Identification for ST
+svar_model_ST <- id.chol(var_model2,order = c("gdp","taxes", "spending") )
+summary(svar_model_ST)
+
+#DT taxes first
+svar_model_taxes_first <- id.chol(var_model1, order = c("taxes", "spending", "gdp"))
+summary(svar_model_taxes_first)
+
+svar_model_spending_first <- id.chol(var_model1, order = c("spending", "taxes", "gdp"))
+summary(svar_model_spending_first)
+
+# Get the contemporaneous impact matrix
+impact_matrix_spending_first <- svar_model_spending_first$B
+print(impact_matrix_spending_first)
+
+diff_tax_to_gdp <- diff(ts_data_log[, "taxes"])
+diff_spend_to_gdp <- diff(ts_data_log[, "spending"])
+diff_gdp <- diff(ts_data_log[, "gdp"])
+
+
+data_diff <- data.frame(
+  time = time(ts_data_log)[-1],  # Escludere il primo periodo
+  diff_tax_to_gdp = diff_tax_to_gdp,
+  diff_spend_to_gdp = diff_spend_to_gdp,
+  diff_gdp = diff_gdp
+)
+
+
+decay_rate <- 0.025
+exp_decay <- exp(-decay_rate)
+
+
+data_diff$mean_diff_tax_to_gdp <- stats::filter(data_diff$diff_tax_to_gdp, filter = rep(exp_decay, length(data_diff$diff_tax_to_gdp)), sides = 1)
+data_diff$mean_diff_spend_to_gdp <- stats::filter(data_diff$diff_spend_to_gdp, filter = rep(exp_decay, length(data_diff$diff_spend_to_gdp)), sides = 1)
+data_diff$mean_diff_gdp <- stats::filter(data_diff$diff_gdp, filter = rep(exp_decay, length(data_diff$diff_gdp)), sides = 1)
+
+
+```
+
+
+```{r}
+df_clean <- data_diff %>% select_if(~!any(is.na(.)))
+head(df_clean)
+```
+
+
+## ADDING THE DUMMY VARIABLES 
+
+We decided to add dummy variables to underline two periods of time: the financial
+crisis of 2008 and the Covid pandemic (2020-2022 approximately).
+This R code simulates the effects of a tax cut and an increase in public spending on
+macroeconomic variables such as GDP (gdp), taxes (taxes), and public spending
+(spending) using a VAR (Vector Autoregressive) model with exogenous variables
+(VARX), during the Covid pandemic.
+First of all, a dataframe is created from a time series ts_data_log. Two dummy variables,
+$Q1_{2009}$ and $Q2_{2020}$, are added, which take the value 1 for the first quarter of 2009 and the second quarter of 2020, respectively.
+Afterwards, we handle the missing value by using the na.omit() function.
+The dataframe data_df is then converted into a time series object ts_data_dummies.
+A VARX model is estimated using the endogenous variables gdp, spending, and taxes,
+along with the exogenous variables $Q1_{2009}$ and $Q2_{2020}$. The model includes also a constant term.
+
+A copy of the dataframe data_df is created for simulation purposes.
+First of all, we simulate the effect of a tax cut in the third quarter of 2020 and, in orderto do proceed, the taxes variable is decreased by 1 unit when $Q2_{2020}$ is equal to 1.
+
+The modified dataframe sim_data is converted into a time series object sim_data_ts and
+afterwards we fit the two VAR models on the simulated data: var_sim_model with a
+constant term and var_sim_model_ST with a trend term.
+
+The impulse response functions (IRFs) are calculated for both models using the irf()
+function, considering an impulse on the taxes variable over a horizon of 20 periods.
+Afterwards, the spending variable is increased by 1 unit when $Q2_{2020}$ is equal to 1 to simulate the effect of an increase in public spending; the modified dataframe sim_data is converted again into a time series object sim_data_ts and two new VAR models are estimated on the modified data: var_sim_model_gov with a constant term and
+var_sim_model_ST_gov with a trend term.
+
+Finally, the impulse response functions (IRFs) are calculated for both models with
+respect to an impulse on the spending variable.
+
+We proceed following the same reasoning also with respect to the 2008 financial crisis.
+In summary, this code simulates the effects of the 2008 financial crisis on
+macroeconomic variables using a VAR model with exogenous variables. It temporarily
+modifies the data to reflect the impacts of the crisis and increased public spending, then re-estimates the model to analyze the differences in impulse responses. The code
+compares the results for models with and without a trend term
+
+```{r, include=FALSE}
+#Now dummies
+
+data_df <- data.frame(date = time(ts_data_log), ts_data_log)
+data_df <- data_df %>%
+  mutate(Q1_2009 = ifelse(date == 2009.00, 1, 0),
+         Q2_2020 = ifelse(date == 2020.25, 1, 0),
+  )
+
+data_df <- data_df %>% na.omit(data_df)
+head(data_df)
+tail(data_df)
+
+ts_data_dummies<-ts(data_df)
+
+varx_model <- VAR(ts_data_dummies[, c("gdp", "spending", "taxes")], p = 2, exogen=ts_data_dummies[, c("Q2_2020", "Q1_2009")], type = "const")
+
+summary_varx <- summary(varx_model)
+
+
+sim_data <- data_df
+
+ 
+sim_data$taxes <- ifelse(sim_data$Q2_2020== 1, sim_data$taxes - 1, sim_data$taxes)  
+
+
+sim_data_ts <- ts(sim_data[, c("gdp", "taxes", "spending")], frequency = 4, start = c(1979, 1))
+
+
+var_sim_model <- VAR(sim_data_ts, p = 2, type = "const")
+var_sim_model_ST <- VAR(sim_data_ts, p = 2, type = "trend")
+
+
+irf_result_dummy <- irf(var_sim_model, impulse = "taxes", response = c("gdp", "spending", "taxes"), n.ahead = 20)
+plot(irf_result_dummy)
+
+
+irf_result_dummy_ST <- irf(var_sim_model_ST, impulse = "taxes", response = c("gdp", "spending", "taxes"), n.ahead = 20)
+plot(irf_result_dummy_ST)
+
+
+sim_data$spending <- ifelse(sim_data$Q2_2020== 1, sim_data$spending + 1, sim_data$spending) 
+
+sim_data_ts <- ts(sim_data[, c("gdp", "taxes", "spending")], frequency = 4, start = c(1979, 1))
+# Fit 
+var_sim_model_gov <- VAR(sim_data_ts, p = 2, type = "const")
+var_sim_model_ST_gov <- VAR(sim_data_ts, p = 2, type = "trend")
+
+
+irf_result_dummy_spending <- irf(var_sim_model_gov, impulse = "spending", response = c("gdp", "spending", "taxes"), n.ahead = 20)
+plot(irf_result_dummy_spending)
+
+
+irf_result_dummy_ST_spending <- irf(var_sim_model_ST_gov, impulse = "spending", response = c("gdp", "spending", "taxes"), n.ahead = 20)
+plot(irf_result_dummy_ST_spending)
+
+#Crisis of 2008
+sim_data$taxes<-ifelse(sim_data$Q1_2009== 1, sim_data$taxes + 1, sim_data$taxes) 
+
+sim_data_ts_2008 <- ts(sim_data[, c("gdp", "taxes", "spending")], frequency = 4, start = c(1979, 1))
+# Fit of VAR model
+var_sim_model_2008 <- VAR(sim_data_ts_2008, p = 2, type = "const")
+var_sim_model_ST_2008 <- VAR(sim_data_ts_2008, p = 2, type = "trend")
+
+irf_result_dummy_2008 <- irf(var_sim_model_2008, impulse = "taxes", response = c("gdp", "spending", "taxes"), n.ahead = 20)
+plot(irf_result_dummy_2008)
+
+irf_result_dummy_ST_2008 <- irf(var_sim_model_ST_2008, impulse = "taxes", response = c("gdp", "spending", "taxes"), n.ahead = 20)
+plot(irf_result_dummy_ST_2008)
+
+
+sim_data$spending <- ifelse(sim_data$Q1_2009== 1, sim_data$spending + 1, sim_data$spending) 
+
+sim_data_ts_spend_2008 <- ts(sim_data[, c("gdp", "taxes", "spending")], frequency = 4, start = c(1979, 1))
+
+var_sim_model_spend_2008 <- VAR(sim_data_ts_spend_2008, p = 2, type = "const")
+var_sim_model_spend_ST_2008 <- VAR(sim_data_ts_spend_2008, p = 2, type = "trend")
+# Example: Impulse on taxes DT
+irf_result_dummy_2008_spend <- irf(var_sim_model_spend_2008, impulse = "spending", response = c("gdp", "spending", "taxes"), n.ahead = 20)
+plot(irf_result_dummy_2008_spend)
+# Example: Impulse on taxes ST
+irf_result_dummy_ST_2008_spend <- irf(var_sim_model_spend_ST_2008, impulse = "spending", response = c("gdp", "spending", "taxes"), n.ahead = 20)
+plot(irf_result_dummy_ST_2008_spend)
+
+```
+
+```{r}
+plot(irf_result_dummy)
+
+plot(irf_result_dummy_ST)
+
+plot(irf_result_dummy_spending)
+
+plot(irf_result_dummy_ST_spending)
+
+plot(irf_result_dummy_2008)
+
+plot(irf_result_dummy_ST_2008)
+
+plot(irf_result_dummy_2008_spend)
+
+plot(irf_result_dummy_ST_2008_spend)
+
+```
+
+# 4. CONTEMPORANEOUS EFFECT
+In the following table we report the estimated coefficients of the contemporaneous
+relations between shocks in the system of equations representing the linear
+combinations of the underlying "structural" tax, spending, and GDP changes.
+The contemporaneous effect are computed both under deterministic trend and stochastic trend, considering the two alternative assumptions that taxes come first, or
+that spending comes first. For convenience of interpretation, while the original
+estimated coefficients have the dimension of elasticities, the table reports derivatives, evaluated at the point of means (dollar change in one variable per dollar change in another).
+
+Considering the first table, the absolute values of the two coefficients representing the contemporaneous effect of taxes and spending on GDP, respectively $c1$ and $c2$, are quite similar across the two specifications, deterministic trends (DT) and stochastic trends (ST). Under DT, a unit shock to spending decreases GDP by $0.0000917 dollars$, while a unit shock to taxes increases GDP by $0.00116 dollars$. Under ST, a unit shock to spending decreases GDP by $0.0000914$ and one to taxes increases it by $0.00117 dollars$.
+Additionally, we computed the effect of a lag equal to one to order to estimate p-valuesand t-statistics and we obtained the following results: under DT, both an increase intaxes and spending lead to a positive effect on GDP by respectively $0.00015$ and $0.0000041$; under ST, a unit shock to taxes barely has an effect on GDP, while a unit shock to spending increases GDP $0.00081$.
+
+In summary, the coefficients for $c1$ are small but statistically significant in the DT model $(p-value ~0.05)$. The ST model shows a slightly higher $p-value (~0.06)$, suggestingmarginal significance. With respect to $c2$, both models show highly significant effects of spending on x, with extremely low p-values and large t-statistics, indicating robust immediate impacts.
+
+Considering $a2$, there are highly significant negative effects of taxes on spending in both models, with very low p-values and large negative coefficients, indicating substantial immediate reductions in spending due to tax changes.
+
+Finally, regarding the effect of spending on taxes, significant positive effects are noted in both models, with p-values indicating that spending changes lead to immediate
+increases in taxes.
+
+The DT model shows significant contemporaneous effects for all parameters, indicating
+a dynamic and immediate relationship between fiscal policy changes and economic
+variables; similarly, the ST model shows significant effects, with slightly higher
+coefficients for spending impacts, suggesting a structurally stable immediate response
+to fiscal changes.
+
+The contemporaneous effect analysis underscores the immediate and significant
+impacts of fiscal policy changes on economic variables. The results demonstrate that
+both tax and spending changes have robust immediate effects, with spending impacts
+generally more pronounced. These findings are crucial for policymakers aiming to
+understand and leverage the immediate effects of fiscal interventions to stabilize or
+stimulate the economy effectively. The consistent results across both DT and ST
+models further reinforce the reliability of these findings.
+
+
+
+```{r, include=FALSE}
+var_model1=VAR(ts_data_log, p = 2, type = "const")
+var_summary=summary(var_model1)
+coefficients_DT<-as.data.frame(coef(var_model1))
+str(coefficients_DT)
+
+var_model2= VAR(ts_data_log, p = 2, type = "trend")
+
+# Structural identification using Cholesky decomposition DT
+svar_model <- id.chol(var_model1, order = c("gdp","taxes", "spending"))
+summary(svar_model)
+
+#Identification for ST
+svar_model_ST <- id.chol(var_model2,order = c("gdp","taxes", "spending") )
+summary(svar_model_ST)
+
+#DT taxes first
+svar_model_taxes_first <- id.chol(var_model1, order = c("taxes", "spending", "gdp"))
+summary(svar_model_taxes_first)
+#ST
+svar_model_taxes_first_ST <- id.chol(var_model2, order = c("taxes", "spending", "gdp"))
+summary(svar_model_taxes_first_ST)
+
+#DT spending first
+svar_model_spending_first <- id.chol(var_model1, order = c("spending", "taxes", "gdp"))
+summary(svar_model_spending_first)
+#ST
+svar_model_spending_first_ST <- id.chol(var_model2, order = c("spending", "taxes", "gdp"))
+summary(svar_model_spending_first_ST)
+
+
+# C1: Effect of taxes on GDP within the quarter
+coef_gdp_taxes <-svar_model$B[("taxes"), 1]
+
+# C2: Effect of spending on GDP within the quarter
+coef_gdp_spending <- svar_model$B[("spending"), 1]
+
+# a2: Effect of spending on taxes within the quarter (assuming b2 = 0)
+# Nota: Dobbiamo simulare b2 = 0, quindi estraiamo i coefficienti  per spending su taxes
+coef_taxes_spending <- svar_model_spending_first$B["taxes", 1]
+
+# b2: Effect of taxes on spending within the quarter (assuming a2 = 0)
+
+coef_spending_taxes <- svar_model_taxes_first$B["spending", 1]
+
+#C1 lag1
+lag1_coef_gdp_taxes <-coefficients_DT[("taxes.l1"), "gdp.Estimate"]
+
+# C2: Effect of spending on GDP within the quarter
+lag1_coef_gdp_spending <- coefficients_DT[("spending.l1"), "gdp.Estimate"]
+
+# a2: Effect of spending on taxes within the quarter (assuming b2 = 0)
+lag1_coef_taxes_spending <- coefficients_DT[("spending.l1"),"taxes.Estimate"]
+
+# b2: Effect of taxes on spending within the quarter (assuming a2 = 0)
+lag1_coef_spending_taxes<- coefficients_DT[("taxes.l1"), "spending.Estimate"]
+
+#p-value
+p_values_c1 <- var_summary$varresult$gdp$coefficients[1, 4]
+p_values_c2 <- var_summary$varresult$gdp$coefficients[2, 4]
+p_values_a2 <- var_summary$varresult$taxes$coefficients[2, 4]
+p_values_b2 <- var_summary$varresult$spending$coefficients[1,4]
+#t_stat
+tstat_c1 <- var_summary$varresult$gdp$coefficients[1, 3]
+tstat_c2 <- var_summary$varresult$gdp$coefficients[2, 3]
+tstat_a2 <- var_summary$varresult$taxes$coefficients[2, 3]
+tstat_b2 <- var_summary$varresult$spending$coefficients[1,3]
+
+mean_gdp=mean(real_gdp_pcapita_xts[,1])
+mean_gov_spending=mean(real_gov_spend_share[,1])
+mean_net_taxes=mean(real_net_taxes[,1])
+
+c1 <- coef_gdp_taxes * (mean_net_taxes/mean_gdp)
+c2 <- coef_gdp_spending * (mean_gov_spending/mean_gdp)
+a2 <- coef_taxes_spending * (mean_gov_spending/mean_net_taxes)
+b2 <- coef_spending_taxes * (mean_net_taxes/mean_gov_spending)
+
+
+lag1_c1 = lag1_coef_gdp_spending * (mean_net_taxes/mean_gdp)
+lag1_c2 = lag1_coef_gdp_taxes * (mean_gov_spending/mean_gdp)
+lag1_a2 = lag1_coef_taxes_spending * (mean_gov_spending/mean_net_taxes)
+lag1_b2 <- lag1_coef_spending_taxes * (mean_net_taxes/mean_gov_spending)
+
+# Create a summary data frame for derivatives
+derivative_table <- data.frame(
+  Parameter = c("c1 (Effect of taxes on x)", "c2 (Effect of spending on x)",
+                "a2 (Effect of taxes on spending)", 
+                "b2 (Effect of spending on taxes)"),
+  
+  P_Value = c(p_values_c1, p_values_c2, p_values_a2, p_values_b2),
+  T_stat = c(tstat_c1, tstat_c2, tstat_a2, tstat_b2),
+  Coeff = c(lag1_c1, lag1_c2, lag1_a2, lag1_b2)
+)
+
+contemporaneousDT=data.frame(
+  Parameter = c("c1 (Effect of taxes on x)", "c2 (Effect of spending on x)",
+                "a2 (Effect of taxes on spending)", 
+                "b2 (Effect of spending on taxes)"),
+  Coeff = c(c1, c2, a2, b2)
+)
+library(kableExtra)
+# Print the derivative table
+kable(derivative_table, caption = "Lag 1 Effect DT (Dollar Change per Dollar Change)")%>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+
+kable(contemporaneousDT, caption = "Contemporaneous Effect DT (Dollar Change per Dollar Change)")%>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+#ST
+
+var_summaryST=summary(var_model2)
+coefficients_ST <-as.data.frame(coef(var_model2))
+str(coefficients_ST)
+# C1: Effect of taxes on GDP within the quarter
+lag1_coef_gdp_taxes_ST <-coefficients_ST[("taxes.l1"), "gdp.Estimate"]
+
+# C2: Effect of spending on GDP within the quarter
+lag1_coef_gdp_spending_ST <- coefficients_ST[("spending.l1"), "gdp.Estimate"]
+
+# a2: Effect of spending on taxes within the quarter (assuming b2 = 0)
+
+lag1_coef_taxes_spending_ST <- coefficients_ST[("spending.l1"),"taxes.Estimate"]
+
+# b2: Effect of taxes on spending within the quarter (assuming a2 = 0)
+
+lag1_coef_spending_taxes_ST <- coefficients_ST[("taxes.l1"), "spending.Estimate"]
+
+#C1
+coef_gdp_taxes_ST <-svar_model_ST$B[("taxes"), 1]
+
+# C2: Effect of spending on GDP within the quarter
+coef_gdp_spending_ST <- svar_model_ST$B[("spending"), 1]
+
+# a2: Effect of spending on taxes within the quarter (assuming b2 = 0)
+
+coef_taxes_spending_ST <- svar_model_spending_first_ST$B["taxes", 1]
+
+# b2: Effect of taxes on spending within the quarter (assuming a2 = 0)
+
+coef_spending_taxes_ST <- svar_model_taxes_first_ST$B["spending", 1]
+
+
+lag1c1_ST <- lag1_coef_gdp_taxes_ST * (mean_net_taxes/mean_gdp)
+lag1c2_ST <- lag1_coef_gdp_spending_ST * (mean_gov_spending/mean_gdp)
+lag1a2_ST <- lag1_coef_taxes_spending_ST * (mean_gov_spending/mean_net_taxes)
+lag1b2_ST <- lag1_coef_spending_taxes_ST * (mean_net_taxes/mean_gov_spending)
+
+c1_ST <- coef_gdp_taxes_ST * (mean_net_taxes/mean_gdp)
+c2_ST <- coef_gdp_spending_ST * (mean_gov_spending/mean_gdp)
+a2_ST <- coef_taxes_spending_ST * (mean_gov_spending/mean_net_taxes)
+b2_ST <- coef_spending_taxes_ST * (mean_net_taxes/mean_gov_spending)
+
+#p-value
+p_values_c1ST <- var_summaryST$varresult$gdp$coefficients[1, 4]
+p_values_c2ST <- var_summaryST$varresult$gdp$coefficients[2, 4]
+p_values_a2ST <- var_summaryST$varresult$taxes$coefficients[2, 4]
+p_values_b2ST <- var_summaryST$varresult$spending$coefficients[1,4]
+#t_stat
+tstat_c1ST <- var_summaryST$varresult$gdp$coefficients[1, 3]
+tstat_c2ST <- var_summaryST$varresult$gdp$coefficients[2, 3]
+tstat_a2ST <- var_summaryST$varresult$taxes$coefficients[2, 3]
+tstat_b2ST <- var_summaryST$varresult$spending$coefficients[1,3]
+
+
+derivative_table_ST <- data.frame(
+  Parameter = c("c1 (Effect of taxes on x)", "c2 (Effect of spending on x)",
+                "a2 (Effect of taxes on spending)", 
+                "b2 (Effect of spending on taxes)"),
+  P_Value = c(p_values_c1ST, p_values_c2ST, p_values_a2ST, p_values_b2ST),
+  T_stat = c(tstat_c1ST, tstat_c2ST, tstat_a2ST, tstat_b2ST),
+  Coeff = c(lag1c1_ST, lag1c2_ST, lag1a2_ST, lag1b2_ST)
+)
+
+contemporaneousST = data.frame(
+  Parameter = c("c1 (Effect of taxes on x)", "c2 (Effect of spending on x)",
+                "a2 (Effect of taxes on spending)", 
+                "b2 (Effect of spending on taxes)"),
+  coeff= c(c1_ST, c2_ST, a2_ST, b2_ST))
+  
+# Print the derivative table
+kable(derivative_table_ST, caption = "Estimated Derivatives ST (Dollar Change per Dollar Change)")%>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+kable(contemporaneousST, caption = "Contemporaneous Effect ST (Dollar Change per Dollar Change)")%>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+
+```
+
+```{r,fig.width=10, fig.height=8}
+
+# Print the derivative table
+kable(derivative_table, caption = "Lag 1 Effect DT (Dollar Change per Dollar Change)")%>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+
+kable(contemporaneousDT, caption = "Contemporaneous Effect DT (Dollar Change per Dollar Change)")%>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+
+
+kable(derivative_table_ST, caption = "Estimated Derivatives ST (Dollar Change per Dollar Change)")%>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+kable(contemporaneousST, caption = "Contemporaneous Effect ST (Dollar Change per Dollar Change)")%>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+```
+
+
+## 5. DYNAMIC EFFECT OF TAXES
+
+## 5.1 Effects of estimated tax shocks
+
+In the following table we compute the effects of a unit tax shock assuming that taxes are ordered first $(a2=0)$, both under DT and under ST. The table summarizes the main
+features of the responses of the three variables (taxes, government spending and GDP)
+considering first, fourth, eighth, twelfth, twentieth quarters and the peak.
+
+First, we set up the plotting area, then we calculate the IRFs for the DT Specification.
+This section computes the IRFs for three responses to a tax shock using the VAR model
+specified as "var_real_DT": the impulse variable is set to "taxes", the responses are GDP("gdp"), government spending ("spending"), and taxes ("taxes"), the forecast horizon is set to 20 periods, with orthogonalized responses and non-cumulative effects.
+
+Afterwards, we generate plots for each of the computed IRFs for the DT specification,
+we extract the IRF matrices from the IRF objects for each response variable, then we
+access the IRF values for the first, fourth, eighth, twelfth, and twentieth quarters for GDP, government spending, and taxes and we compute the peak value of the IRF for
+GDP, indicating the maximum response to the tax shock.
+
+Finally, we perform the explained operations for the ST specification in the same
+manner as for the DT specification.
+Under DT, output falls during the first quarter by $3.19$ $cents$, from then on it decreases by less each quarter, moving steadily back to trend and reaching its peak at $0.00419$.
+The effect of tax shocks on government spending is small at all horizons, with the
+largest effect being $1.89$ during the first quarter.
+In a similar manner, under the trend specification (ST), output experiences an initial
+decline of $3.17$ $cents$ in the first quarter, followed by a gradual decrease in subsequent quarters.
+Here, similar to the DT specification, GDP reaches its peak at $0.00412$.
+
+Tax shocks exert a comparable immediate impact on output. However, the effect on taxes
+appears to be slightly more persistent than in the difference specification (DT), while
+the impact on spending remains similar across both specifications.
+In conclusion we can notice that tax increases have a negative effect on output under
+both specifications.
+The immediate effect is that both models show a significant immediate response to tax
+changes, with a sharp initial increase in taxes leading to a substantial negative impact on GDP. 
+
+Government spending increases significantly in the first quarter, reflecting a
+responsive fiscal adjustment.
+Instead, in the long term dynamics over the quarters, the effects of tax shocks diminish.
+The continuing negative tax responses and decreasing negative GDP impacts suggest
+that the initial shock has a tapering influence on the economy over time.
+
+In the graphical representations, the solid line represents the point estimates, while the dashed lines indicate the one-standard deviation bands. These bands are calculated
+through Boostrap simulations.
+
+```{r, include=FALSE}
+par(mfrow = c(2, 3))
+#DT 
+irf_taxes_gdp_DT <- irf((var_model1), impulse = "taxes", response =  "gdp" ,  n.ahead = 20,  cumulative = FALSE)
+
+irf_taxes_spending_DT <- irf((var_model1), impulse = "taxes", response = "spending", n.ahead = 20, cumulative = FALSE)
+
+irf_taxes_tax_DT <- irf((var_model1), impulse = "taxes", response = "taxes", n.ahead = 20, ortho = TRUE, cumulative = FALSE)
+
+plot_irf_taxes_gdp_DT <- plot(irf_taxes_gdp_DT)
+plot_irf_taxes_spending_DT <- plot(irf_taxes_spending_DT)
+plot_irf_taxes_tax_DT <- plot(irf_taxes_tax_DT)
+
+# Extract the 'irf' list from the main object
+irf_list <- irf_taxes_gdp_DT$irf
+irf_list1 <- irf_taxes_spending_DT$irf
+irf_list2 <- irf_taxes_tax_DT$irf
+
+# Extract the matrix of IRF values
+irf_matrix <- irf_list[[1]]
+irf_matrix1 <- irf_list1[[1]]
+irf_matrix2 <- irf_list2[[1]]
+
+# Access values 
+first_quarter_response <- irf_matrix[1, ]
+fourth_quarter_response <- irf_matrix[4, ]
+eigth_quarter_response <- irf_matrix[8, ]
+twelvth_quarter_response <- irf_matrix[12, ]
+twentith_quarter_response <- irf_matrix[20, ]
+
+first_quarter_response_spend <- irf_matrix1[1, ]
+fourth_quarter_response_spend  <- irf_matrix1[4, ]
+eigth_quarter_response_spend  <- irf_matrix1[8, ]
+twelvth_quarter_response_spend  <- irf_matrix1[12, ]
+twentith_quarter_response_spend <- irf_matrix1[20, ]
+
+first_quarter_response_tax <- irf_matrix2[1, ]
+fourth_quarter_response_tax <- irf_matrix2[4, ]
+eigth_quarter_response_tax <- irf_matrix2[8, ]
+twelvth_quarter_response_tax <- irf_matrix2[12, ]
+twentith_quarter_response_tax <- irf_matrix2[20, ]
+
+#Peak of gdp
+peak_value <- max(irf_matrix)
+#ST 
+irf_taxes_gdp_ST <- irf((var_model2), impulse = "taxes", response = "gdp" , n.ahead = 20, cumulative = FALSE)
+
+irf_taxes_spending_ST<- irf((var_model2), impulse = "taxes", response = "spending", n.ahead = 20, cumulative = FALSE)
+
+irf_taxes_tax_ST <- irf((var_model2), impulse = "taxes", response = "taxes", n.ahead = 20, ortho = TRUE, cumulative = FALSE)
+
+plot_irf_taxes_gdp_ST <- plot(irf_taxes_gdp_ST)
+plot_irf_taxes_spending_ST <- plot(irf_taxes_spending_ST)
+plot_irf_taxes_tax_ST <- plot(irf_taxes_tax_ST)
+
+
+# Extract the 'irf' list from the main object
+irf_list_ST <- irf_taxes_gdp_ST$irf
+irf_list1_ST <- irf_taxes_spending_ST$irf
+irf_list2_ST<- irf_taxes_tax_ST$irf
+
+# Extract the matrix of IRF values
+irf_matrix_ST <- irf_list_ST[[1]]
+irf_matrix1_ST <- irf_list1_ST[[1]]
+irf_matrix2_ST<- irf_list2_ST[[1]]
+
+# Access values 
+first_quarter_responseST <- irf_matrix_ST[1, ]
+fourth_quarter_responseST<- irf_matrix_ST[4, ]
+eigth_quarter_responseST <- irf_matrix_ST[8, ]
+twelvth_quarter_responseST <- irf_matrix_ST[12, ]
+twentith_quarter_responseST <- irf_matrix_ST[20, ]
+
+first_quarter_response_spendST <- irf_matrix1_ST[1, ]
+fourth_quarter_response_spendST  <- irf_matrix1_ST[4, ]
+eigth_quarter_response_spendST  <- irf_matrix1_ST[8, ]
+twelvth_quarter_response_spendST  <- irf_matrix1_ST[12, ]
+twentith_quarter_response_spendST <- irf_matrix1_ST[20, ]
+
+first_quarter_response_taxST <- irf_matrix2_ST[1, ]
+fourth_quarter_response_taxST<- irf_matrix2_ST[4, ]
+eigth_quarter_response_taxST <- irf_matrix2_ST[8, ]
+twelvth_quarter_response_taxST <- irf_matrix2_ST[12, ]
+twentith_quarter_response_taxST <- irf_matrix2_ST[20, ]
+
+#Peak value
+peak_valueST <- max(irf_matrix_ST)
+
+#Tabella DT
+data_for_table <- data.frame(
+  Quarter = c("1° Quarter", "4° Quarter", "8° Quarter", "12° Quarter", "20° Quarter", "The peak"),
+  Taxes = c(first_quarter_response, fourth_quarter_response, eigth_quarter_response, twelvth_quarter_response, twentith_quarter_response, NA),
+  GDP = c(first_quarter_response_spend, fourth_quarter_response_spend, eigth_quarter_response_spend, twelvth_quarter_response_spend, twentith_quarter_response_spend, peak_value),  
+  Gov_spending = c(first_quarter_response_tax, fourth_quarter_response_tax, eigth_quarter_response_tax, twelvth_quarter_response_tax, twentith_quarter_response_tax, NA)
+)
+
+library(kableExtra)
+
+
+data_for_table %>%
+  kable("html", caption = "Responses to tax shocks DT") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+
+data_for_tableST <- data.frame(
+  Quarter = c("1° Quarter", "4° Quarter", "8° Quarter", "12° Quarter", "20° Quarter", "The peak"),
+  Taxes = c(first_quarter_responseST, fourth_quarter_responseST, eigth_quarter_responseST, twelvth_quarter_responseST, twentith_quarter_responseST, NA),
+  GDP = c(first_quarter_response_spendST, fourth_quarter_response_spendST, eigth_quarter_response_spendST, twelvth_quarter_response_spendST, twentith_quarter_response_spendST, peak_valueST),  
+  Gov_spending = c(first_quarter_response_taxST, fourth_quarter_response_taxST, eigth_quarter_response_taxST, twelvth_quarter_response_taxST, twentith_quarter_response_taxST, NA)
+)
+
+data_for_tableST %>%
+  kable("html", caption = "Responses to tax shocks ST") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+
+library(grid)
+
+
+table1_grob <- tableGrob(data_for_table)
+table2_grob <- tableGrob(data_for_tableST)
+title1 <- textGrob("Table 1: Response to tax shock DT", gp = gpar(fontsize = 14, fontface = "bold"))
+title2 <- textGrob("Table 2: Response to tax shock ST", gp = gpar(fontsize = 14, fontface = "bold"))
+grid.arrange(title1, table1_grob, 
+             title2, table2_grob, 
+             ncol = 1)
+```
+
+```{r,fig.width=10, fig.height=8}
+plot_irf_taxes_gdp_DT <- plot(irf_taxes_gdp_DT)
+plot_irf_taxes_spending_DT <- plot(irf_taxes_spending_DT)
+plot_irf_taxes_tax_DT <- plot(irf_taxes_tax_DT)
+
+
+plot_irf_taxes_gdp_ST <- plot(irf_taxes_gdp_ST)
+plot_irf_taxes_spending_ST <- plot(irf_taxes_spending_ST)
+plot_irf_taxes_tax_ST <- plot(irf_taxes_tax_ST)
+
+grid.arrange(title1, table1_grob, 
+             title2, table2_grob, 
+             ncol = 1)
+```
+
+## 5.2 Dummy variables 
+
+As we mentioned above, we decided to add dummy variables to highlight two periods of
+time: the financial crisis of 2008 and the Covid pandemic (2020-2022 approximately).
+After considering the responses to tax shocks in general, we computed the impulse
+response functions for the VAR model that includes dummy variables, using the
+difference specification (DT).
+
+The impulse response functions (IRFs) derived from the VAR model with the dummy
+variable for $Q2_{2020}$ provide valuable insights into the dynamic effects of the specified shock on the log change in GDP. The graph illustrates the immediate response of GDP to the shock represented by the dummy variable for $Q2_{2020}$. It is expected to show a significant initial decline in GDP, reflecting the economic disruptions caused by the COVID-19 pandemic. Following the initial impact, the IRFs reveal how GDP continues to respond over the subsequent quarters. The trajectory of the response may indicate whether the economy rebounds quickly or experiences a prolonged period of
+adjustment. A gradual recovery would suggest lingering effects from the shock, while a
+rapid return to pre-shock levels might indicate a more resilient economic structure. The results can inform policymakers about the effectiveness of interventions during the
+crisis. If the response of GDP is particularly negative, it may suggest a need for more
+aggressive fiscal or monetary policies to stimulate recovery
+
+
+
+
+## 6. DYNAMIC EFFECTS OF SPENDING 
+
+Now, we are interested in the effects of a unit spending shock on GDP when spending is
+ordered first (b2 = 0) under DT and under ST. As in the case of taxes, the table we obtain summarizes the main features of the responses to a spending shock under alternative specifications.
+
+During the first quarter, under DT, spending shock leads to a positive GDP response of
+$0.0173115$, with taxes decreasing by $-0.0034912$ and no change in government spending. Under ST, the GDP response is similar at $0.0172925$, with a slight negative
+effect on taxes $(-0.0036125)$ and no change in government spending.
+
+In 4th quarter, the positive GDP impact diminishes over time. In the DT model, GDP
+increases by $0.0116072$, and taxes decrease slightly. In the ST model, GDP increases by $0.0102809$. From 8th to 20th quarters the positive impact on GDP continues to decline in both models. 
+
+Taxes show varied responses, and government spending remains mostly unchanged or slightly negative.The peak response for GDP in both models is observed immediately in the first quarter following the spending shock.
+
+Considering the graphical analysis, the impulse response functions illustrate the
+trajectory of GDP, taxes, and government spending following the spending shock. The
+GDP response shows a declining positive trend, while taxes and government spending
+show varied short-term adjustments.
+
+Overall, the tables and graphs effectively depict the immediate and dynamic responses
+to a unit spending shock on GDP, taxes, and government spending. Both DT and ST
+models indicate a significant immediate positive impact on GDP, which diminishes over
+time. Taxes tend to decrease initially, and government spending shows minimal
+changes in the long run. These findings highlight the importance of temporal dynamics
+in understanding the effects of fiscal policy changes and provide valuable insights for
+policymakers aiming to leverage spending adjustments to influence economic outcomes.
+
+Finally, in all specifications output responds positively to a spending shock. Spending
+reacts strongly and persistently to its own shock and, depending on the specification,
+the spending multiplier is larger or smaller than the tax multiplier. As in the case of
+taxes, the ordering of the two fiscal variables does not matter for the response to
+spending shocks.
+
+```{r, include=FALSE}
+#DT 
+irf_spend_gdp_DT <- irf((var_model1), impulse = "spending", response = "gdp", n.ahead = 20, cumulative = FALSE)
+plot(irf_spend_gdp_DT)
+irf_spend_spending_DT <- irf((var_model1), impulse = "spending", response = "spending", n.ahead = 20, ortho = TRUE, cumulative = FALSE)
+plot(irf_spend_spending_DT)
+irf_spend_tax_DT <- irf((var_model1), impulse = "spending", response = "taxes", n.ahead = 20, cumulative = FALSE)
+plot(irf_spend_tax_DT)
+
+#ST 
+irf_spend_gdp_ST <- irf((var_model2), impulse = "spending", response = "gdp", n.ahead = 20, cumulative = FALSE)
+plot(irf_spend_gdp_ST)
+irf_spend_spending_ST<- irf((var_model2), impulse = "spending", response = "spending", n.ahead = 20, ortho = TRUE, cumulative = FALSE)
+plot(irf_spend_spending_ST)
+irf_spend_tax_ST <- irf((var_model2), impulse = "spending", response = "taxes", n.ahead = 20, cumulative = FALSE)
+plot(irf_spend_tax_ST)
+
+#DT
+# Extract the 'irf' list from the main object
+irf_list_spend <- irf_spend_gdp_DT$irf
+irf_list1_spend <- irf_spend_spending_DT$irf
+irf_list2_spend <- irf_spend_tax_DT$irf
+
+# Extract the matrix of IRF values
+irf_matrix_spend <- irf_list_spend[[1]]
+irf_matrix1_spend <- irf_list1_spend[[1]]
+irf_matrix2_spend <- irf_list2_spend[[1]]
+
+# Access values 
+first_quarter_response1 <- irf_matrix_spend[1, ]
+fourth_quarter_response1 <- irf_matrix_spend[4, ]
+eigth_quarter_response1 <- irf_matrix_spend[8, ]
+twelvth_quarter_response1 <- irf_matrix_spend[12, ]
+twentith_quarter_response1 <- irf_matrix_spend[20, ]
+
+first_quarter_response_spend1 <- irf_matrix1_spend[1, ]
+fourth_quarter_response_spend1  <- irf_matrix1_spend[4, ]
+eigth_quarter_response_spend1  <- irf_matrix1_spend[8, ]
+twelvth_quarter_response_spend1  <- irf_matrix1_spend[12, ]
+twentith_quarter_response_spend1 <- irf_matrix1_spend[20, ]
+
+first_quarter_response_tax1 <- irf_matrix2_spend[1, ]
+fourth_quarter_response_tax1 <- irf_matrix2_spend[4, ]
+eigth_quarter_response_tax1 <- irf_matrix2_spend[8, ]
+twelvth_quarter_response_tax1 <- irf_matrix2_spend[12, ]
+twentith_quarter_response_tax1 <- irf_matrix2_spend[20, ]
+
+#Peak of gdp
+peak_value1 <- max(irf_matrix_spend)
+
+
+data_for_table_spend <- data.frame(
+  Quarter = c("1° Quarter", "4° Quarter", "8° Quarter", "12° Quarter", "20° Quarter", "The peak"),
+  Taxes = c(first_quarter_response1, fourth_quarter_response1, eigth_quarter_response1, twelvth_quarter_response1, twentith_quarter_response1, NA),
+  GDP = c(first_quarter_response_spend1, fourth_quarter_response_spend1, eigth_quarter_response_spend1, twelvth_quarter_response_spend1, twentith_quarter_response_spend1, peak_value1),  
+  Gov_spending = c(first_quarter_response_tax1, fourth_quarter_response_tax1, eigth_quarter_response_tax1, twelvth_quarter_response_tax1, twentith_quarter_response_tax1, NA)
+)
+
+data_for_table_spend %>%
+  kable("html", caption = "Responses to spending shocks DT") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+
+#ST
+# Extract the 'irf' list from the main object
+irf_list_spend_ST <- irf_spend_gdp_ST$irf
+irf_list1_spend_ST <- irf_spend_spending_ST$irf
+irf_list2_spend_ST<- irf_spend_tax_ST$irf
+
+# Extract the matrix of IRF values
+irf_matrix_spend_ST <- irf_list_spend_ST[[1]]
+irf_matrix1_spend_ST <- irf_list1_spend_ST[[1]]
+irf_matrix2_spend_ST<- irf_list2_spend_ST[[1]]
+
+# Access values 
+first_quarter_responseST1 <- irf_matrix_spend_ST[1, ]
+fourth_quarter_responseST1<- irf_matrix_spend_ST[4, ]
+eigth_quarter_responseST1 <- irf_matrix_spend_ST[8, ]
+twelvth_quarter_responseST1 <- irf_matrix_spend_ST[12, ]
+twentith_quarter_responseST1 <- irf_matrix_spend_ST[20, ]
+
+first_quarter_response_spendST1 <- irf_matrix1_spend_ST[1, ]
+fourth_quarter_response_spendST1  <- irf_matrix1_spend_ST[4, ]
+eigth_quarter_response_spendST1  <- irf_matrix1_spend_ST[8, ]
+twelvth_quarter_response_spendST1  <- irf_matrix1_spend_ST[12, ]
+twentith_quarter_response_spendST1 <- irf_matrix1_spend_ST[20, ]
+
+first_quarter_response_taxST1 <- irf_matrix2_spend_ST[1, ]
+fourth_quarter_response_taxST1<- irf_matrix2_spend_ST[4, ]
+eigth_quarter_response_taxST1 <- irf_matrix2_spend_ST[8, ]
+twelvth_quarter_response_taxST1 <- irf_matrix2_spend_ST[12, ]
+twentith_quarter_response_taxST1 <- irf_matrix2_spend_ST[20, ]
+
+#Peak value
+peak_valueST_spend <- max(irf_matrix_spend_ST)
+
+data_for_table_spendST <- data.frame(
+  Quarter = c("1° Quarter", "4° Quarter", "8° Quarter", "12° Quarter", "20° Quarter", "The peak"),
+  Taxes = c(first_quarter_responseST1, fourth_quarter_responseST1, eigth_quarter_responseST1, twelvth_quarter_responseST1, twentith_quarter_responseST1, NA),
+  GDP = c(first_quarter_response_spendST1, fourth_quarter_response_spendST1, eigth_quarter_response_spendST1, twelvth_quarter_response_spendST1, twentith_quarter_response_spendST1, peak_valueST_spend),  
+  Gov_spending = c(first_quarter_response_taxST1, fourth_quarter_response_taxST1, eigth_quarter_response_taxST1, twelvth_quarter_response_taxST1, twentith_quarter_response_taxST1, NA)
+)
+
+
+data_for_table_spendST %>%
+  kable("html", caption = "Responses to spending shocks ST") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+
+table3_grob <- tableGrob(data_for_table_spend)
+table4_grob <- tableGrob(data_for_table_spendST)
+title3 <- textGrob("Table 1: Response to spending shock DT", gp = gpar(fontsize = 14, fontface = "bold"))
+title4 <- textGrob("Table 2: Response to spending shock ST", gp = gpar(fontsize = 14, fontface = "bold"))
+grid.arrange(title3, table3_grob, 
+             title4, table4_grob, 
+             ncol = 1)
+
+
+```
+
+
+```{r,fig.width=10, fig.height=8}
+#DT 
+
+plot(irf_spend_gdp_DT)
+
+plot(irf_spend_spending_DT)
+
+plot(irf_spend_tax_DT)
+
+#ST 
+
+plot(irf_spend_gdp_ST)
+
+plot(irf_spend_spending_ST)
+
+plot(irf_spend_tax_ST)
+
+
+grid.arrange(title3, table3_grob, 
+             title4, table4_grob, 
+             ncol = 1)
+
+```
+
+## 7 ROBUSTNESS: sub-sample stability
+
+Subsample stability is a critical aspect when analyzing Vector Autoregression (VAR)
+models, especially those covering extensive time periods. Unlike monetary policy, which
+can often be segmented into distinct regimes, fiscal policy does not easily conform to
+such classifications. To evaluate subsample stability, we adopt a methodology of
+systematically excluding one decade at a time from the analysis. This approach allows
+us to assess the robustness of our findings across different time frames and ensures that the results are not unduly influenced by specific periods within the overall dataset. 
+
+By conducting this analysis, we can better understand the stability of the VAR model's
+estimates and the implications of fiscal policy over time.
+
+With respect to the response stability to tax shock, under DT the maximum GDP
+response ranges from $0.00241 (Exclude_{2019})$ to $0.00543 (Exclude_{2009})$.
+
+The highest response is observed when the 2009 decade is excluded, indicating a
+significant impact of the 2000s on the model's stability.
+Under the ST specification, the maximum GDP response ranges from $0.00291(Exclude_{2019})$ to $0.00515 (Exclude_{2009})$. Similar to the DT model, excluding the 2009 decade yields the highest response, suggesting that the results are consistent across both models.
+
+The responses under DT and ST are relatively similar in magnitude for each excluded
+decade, with slight variations.
+The decade exclusion that leads to the highest response is consistent across both
+models, indicating robustness in the findings.
+With respect to a spending shock, under DT the maximum GDP response ranges from -
+$0.00077 (Exclude_{1979})$ to $0.00864 (Exclude_{1989})$.
+
+The highest positive response is observed when the 1989 decade is excluded,
+suggesting that the 1980s play a crucial role in the model's behavior.
+Under ST, the maximum GDP response ranges from $-0.00134 (Exclude_{1979})$ to
+$0.00774 ({Exclude_1989})$. 
+Excluding the 1989 decade yields the highest response in both
+DT and ST models, again indicating the critical role of the 1980s.
+
+There is a notable difference in the magnitude of responses between DT and ST models,
+with DT generally showing higher maximum responses. The responses under both
+models follow a similar pattern, with the highest and lowest responses occurring for the same excluded decades.
+
+The data suggests that the excluded decade has a significant impact on the stability of
+the GDP responses to both tax and spending shocks. Both DT and ST models show
+consistent patterns, with the 2000s being particularly influential for tax shocks and the 1980s for spending shocks. 
+The results indicate that the economic conditions and policies of these decades play a crucial role in determining the model's stability and response behavior. 
+
+```{r, include=FALSE}
+#7 
+# Define different sub-samples
+
+
+decades_to_exclude <- seq(1979, 2024, by=10)
+results <- list()
+time(ts_data_log)
+
+
+results <- list()
+results1 <- list()
+results2 <- list()
+results3 <- list()
+for (decade in decades_to_exclude) {
+  
+  data_subset <- window(ts_data_log, start=c(1979, 1), end=c(2024, 1))
+  data_subset <- data_subset[!(time(data_subset) >= decade & time(data_subset) < decade + 10), ]
+  
+ 
+  var_dt <- VAR(data_subset, p=2, type= "const") 
+  var_st<-VAR(data_subset, p=2, type= "trend")
+  
+  irf_results <- irf(var_dt, impulse="taxes", response="gdp")
+  irf_results_st <- irf(var_st, impulse="taxes", response="gdp")
+  irf_results_spend <- irf(var_dt, impulse="spending", response="gdp")
+  irf_results_spend_st <- irf(var_st, impulse="spending", response="gdp")
+  
+  irf_results1 <- irf_results$irf
+  irf_results2 <- irf_results_st$irf
+  irf_results3 <- irf_results_spend$irf
+  irf_results4 <- irf_results_spend_st$irf
+
+  results[[paste0("Exclude_", decade)]] <- as.data.frame(irf_results1)
+  results1[[paste0("Exclude_", decade)]]<- as.data.frame(irf_results2)
+  results2[[paste0("Exclude_", decade)]] <- as.data.frame(irf_results3)
+  results3[[paste0("Exclude_", decade)]]<- as.data.frame(irf_results4)
+}
+
+
+print(results)
+print(results1)
+print(results2)
+print(results3)
+
+max_gdp_coefficients <- numeric(length(results))
+max_gdp_coefficients_st <- numeric(length(results1))
+max_gdp_coefficients_spend <- numeric(length(results2))
+max_gdp_coefficients_spend_st <- numeric(length(results3))
+names(max_gdp_coefficients) <- names(results)
+names(max_gdp_coefficients_st) <- names(results1)
+names(max_gdp_coefficients_spend) <- names(results2)
+names(max_gdp_coefficients_spend_st) <- names(results3)
+
+for (decade_label in names(results)) {
+  gdp_values <- results[[decade_label]]$gdp
+  gdp_values_st <-results1[[decade_label]]$gdp
+  gdp_values_spend <- results2[[decade_label]]$gdp
+  gdp_values_spend_st <-results3[[decade_label]]$gdp
+  
+  max_gdp <- max(gdp_values, na.rm = TRUE)
+  max_gdp_st <- max(gdp_values_st, na.rm = TRUE)
+  max_gdp_spend <- max(gdp_values_spend, na.rm = TRUE)
+  max_gdp_spend_st <- max(gdp_values_spend_st, na.rm = TRUE)
+  
+  max_gdp_coefficients[decade_label]=max_gdp 
+  max_gdp_coefficients_st[decade_label]=max_gdp_st
+  max_gdp_coefficients_spend[decade_label]=max_gdp_spend 
+  max_gdp_coefficients_spend_st[decade_label]=max_gdp_spend_st
+}
+
+print(max_gdp_coefficients)
+print(max_gdp_coefficients_st)
+print(max_gdp_coefficients_spend)
+print(max_gdp_coefficients_spend_st)
+
+
+results_taxes <- data.frame(
+  Max_GDP_DT = max_gdp_coefficients,
+  Max_GDP_ST = max_gdp_coefficients_st
+)
+
+results_spend<-data.frame(
+  Max_GDP_DT = max_gdp_coefficients_spend,
+  Max_GDP_ST = max_gdp_coefficients_spend_st
+)
+
+library(gridExtra)
+table7_grob <- tableGrob(results_taxes)
+table7spend_grob <- tableGrob(results_spend)
+title7 <- textGrob("Response stability to tax shock", gp = gpar(fontsize = 14, fontface = "bold"))
+title7_spend <- textGrob("Response stability to spending shock", gp = gpar(fontsize = 14, fontface = "bold"))
+grid.arrange(title7, table7_grob, 
+             title7_spend, table7spend_grob, 
+             ncol = 1)
+
+```
+
+```{r,fig.width=10, fig.height=8}
+table7_grob <- tableGrob(results_taxes)
+table7spend_grob <- tableGrob(results_spend)
+title7 <- textGrob("Response stability to tax shock", gp = gpar(fontsize = 14, fontface = "bold"))
+title7_spend <- textGrob("Response stability to spending shock", gp = gpar(fontsize = 14, fontface = "bold"))
+grid.arrange(title7, table7_grob, 
+             title7_spend, table7spend_grob, 
+             ncol = 1)
+```
+
+
+
+
+## 8. EFFECTS ON OUTPUT COMPONENTS 
+
+As the final step of our analysis, we decompose the output effects of tax and spending
+shocks into the effects on each component of GDP. This exercise helps understand the
+differences between alternative theories: for instance, both Standard Neoclassical and
+Keynesian models imply a positive effect of government spending on output. However,
+Neoclassical models usually predict a negative effect on private consumption, while Keynesian models usually predict the opposite sign.
+The impulse response of the various GDP components to a net tax shock, under both DT
+(constant term) and ST (trend term), reveals significant changes in the responses of
+aggregate GDP and government spending as additional components are included in the
+VAR model. 
+
+Specifically, the responses of GDP and government spending are given for
+the three-variable model, and the unconstrained sum of the responses of the individual
+components of GDP is also provided. This analysis highlights the importance of
+considering the full range of components when interpreting the effects of fiscal policy
+shocks.
+
+In order to analyze the impact of tax and spending shocks on various economic
+indicators using the VAR (Vector Autoregression) model. Then, we computed the IRFs for both the tax and spending shocks. The IRFs show how the economic indicators
+respond to a one-unit shock in the tax or spending variables.
+We extracted the IRFs values for the tax shock and spending shock on various
+economic indicators for both the DT (constant term) and ST (trend term) models and various time periods (quarters).
+
+With respect to a change in taxes, under DT, GDP and spending have a small but positive
+correlation, with a peak of $0.00126$ around the twentieth quarter for GDP and of $0.007$ for spending. On the other hand, in the eighth quarter a unit shock of taxes decreases the majority of the private components of GDP (investment, consumption, exports and imports). 
+This variables (except for investment and consumption) are most of the time
+negatively correlated with a tax increase, with peaks not higher than $0.0059$.
+
+Under ST, the situation is quite different: a unit shock in taxes decreases GDP and its
+private components, while it leads to an increase in spending. In particular, GDP
+decreases steadily with a peak of $0.0054$.
+
+Now, considering a spending shock:
+
+- Under DT, mostly around the eighth and twelfth quarters, a spending shock
+affects negatively all the variables, while in the other periods there is a small but
+nonetheless positive correlation. GDP reaches its peak at $0.1139$.
+
+- Under ST, the situation is quite similar but the effects of a unit spending shock
+are more pronounced and they are negative almost everywhere.
+
+In a model with a deterministic trend, it is assumed that the series has a fixed linear or non-linear trend over time. In a model with a stochastic trend, it is assumed that the series has a random trend that follows a stochastic process. In summary, if a
+deterministic trend is assumed, the sign of the coefficients reflects the direction of the trend. If a stochastic trend is assumed, the sign can be different due to the random nature of the trend. 
+
+The effects of fiscal policy on investment are clearly inconsistent with a standard
+Keynesian approach. In the standard Keynesian model, an increase in spending may
+increase or decrease investment depending on the relative strength of the effects of the increase in output and the increase in the interest rate; but, in either case, increases in spending and taxes have opposite effects on investment. This is not the case empirically.
+
+```{r, include=FALSE}
+consumption<- fredr(series_id = "PCEC", observation_start = as.Date("1979-01-01"), observation_end =as.Date("2024-01-01"))
+head(consumption)
+#transform into a time series to apply var
+consumption_xts <- xts(consumption$value, order.by = as.Date(consumption$date))
+real_consumption=(consumption_xts/gdp_def_xts)/adj_pop_xts
+
+real_investment<- fredr(series_id = "GPDIC1", observation_start = as.Date("1979-01-01"), observation_end =as.Date("2024-01-01"))
+head(real_investment)
+real_inv_xts <- xts(real_investment$value, order.by = as.Date(real_investment$date))
+real_invest_pc=real_inv_xts/adj_pop_xts
+
+export<-fredr(series_id = "EXPGS", observation_start = as.Date("1979-01-01"), observation_end =as.Date("2024-01-01"))
+export_xts <- xts(export$value, order.by = as.Date(export$date))
+real_export<- (export_xts/gdp_def_xts)/adj_pop_xts
+
+import<-fredr(series_id = "IMPGS", observation_start = as.Date("1979-01-01"), observation_end =as.Date("2024-01-01"))
+import_xts<-xts(import$value, order.by = as.Date(import$date))
+real_import<- (import_xts/gdp_def_xts)/adj_pop_xts
+
+sum=real_gov_spend_share + real_consumption + real_invest_pc + real_export - real_import
+
+
+observation_start <- as.Date("1979-01-01")
+observation_end <- as.Date("2024-01-01")
+
+# Create a sequence of quarterly dates
+dates <- seq(from = observation_start, to = observation_end, by = "quarter")
+data_for_9 <- data.frame(
+  date = dates,
+  taxes = real_net_taxes,       
+  spending = real_gov_spend_share,     
+  gdp = real_gdp_pcapita_xts,
+  consum= real_consumption,
+  invest= real_invest_pc,
+  exp=real_export,
+  imp=real_import,
+  total_sum=sum
+  )
+
+colnames(data_for_9) <- c("date", "taxes", "spending", "gdp", "consum", "invest", "exp", "imp", "total_sum")   
+
+data_for_9$taxes[data_for_9$taxes < 0] <- 1e-6
+data_for_9$spending[data_for_9$spending < 0] <- 1e-6
+
+# Remove rows with NA values
+data_for_9=na.omit(data_for_9)
+#Transform in a time series, 
+ts_data_for_9 <- ts(data_for_9[, c("taxes", "gdp", "spending", "invest", "consum", "exp", "imp", "total_sum")], start = c(1979, 1), frequency = 4)
+ts_data_for_9_log <- log(ts_data_for_9)
+
+#VAR DT
+var_DT_9<-VAR(ts_data_for_9_log, p=2, type="const")
+
+irf_taxes_9<- irf(var_DT_9, impulse = "taxes", response = c("gdp", "spending", "consum", "invest", "exp", "imp", "total_sum"), n.ahead = 20, ortho = FALSE, cumulative = FALSE)
+irf_spending_9<- irf(var_DT_9, impulse = "spending", response = c("gdp", "spending", "consum", "invest", "exp", "imp", "total_sum"), n.ahead = 20, ortho = FALSE, cumulative = FALSE)
+
+
+#VAR ST
+var_ST_9<-VAR(ts_data_for_9_log, p=2, type="trend")
+
+irf_taxes_9_ST<- irf(var_ST_9, impulse = "taxes", response = c("gdp", "spending", "consum", "invest", "exp", "imp", "total_sum"), n.ahead = 20, ortho = FALSE, cumulative = FALSE)
+irf_spending_9_ST<- irf(var_ST_9, impulse = "spending", response = c("gdp", "spending", "consum", "invest", "exp", "imp", "total_sum"), n.ahead = 20, ortho = FALSE, cumulative = FALSE)
+
+# Extract the 'irf' list form tax shock DT
+
+irf_tax<- irf_taxes_9$irf
+irf_matrix_tax_9 <- irf_tax[[1]]
+# Access values DT
+first_quarter_responseDT9<- irf_matrix_tax_9[1, ]
+fourth_quarter_responseDT9<- irf_matrix_tax_9[4, ]
+eigth_quarter_responseDT9 <- irf_matrix_tax_9[8, ]
+twelvth_quarter_responseDT9 <- irf_matrix_tax_9[12, ]
+twentith_quarter_responseDT9 <- irf_matrix_tax_9[20, ]
+
+peak_values_tax9DT <- apply(irf_matrix_tax_9, 2, max)
+
+#Extract the 'irf' list form tax shock ST
+irf_tax_ST<- irf_taxes_9_ST$irf
+irf_matrix_tax_9_ST <- irf_tax_ST[[1]]
+# Access values ST
+first_quarter_responseST9<- irf_matrix_tax_9_ST[1, ]
+fourth_quarter_responseST9<- irf_matrix_tax_9_ST[4, ]
+eigth_quarter_responseST9 <- irf_matrix_tax_9_ST[8, ]
+twelvth_quarter_responseST9 <- irf_matrix_tax_9_ST[12, ]
+twentith_quarter_responseST9 <- irf_matrix_tax_9_ST[20, ]
+
+peak_value_tax9ST<-apply(irf_matrix_tax_9_ST, 2, max)
+
+data_for_table_9 <- data.frame(
+  Quarter = c("1° Quarter", "4° Quarter", "8° Quarter", "12° Quarter", "20° Quarter", "The peak"),
+  Effect =rbind(first_quarter_responseDT9, fourth_quarter_responseDT9, eigth_quarter_responseDT9, twelvth_quarter_responseDT9, twentith_quarter_responseDT9, peak_values_tax9DT)
+)
+
+data_for_table_9ST<- data.frame(
+  Quarter = c("1° Quarter", "4° Quarter", "8° Quarter", "12° Quarter", "20° Quarter", "The peak"),
+  Effect =rbind(first_quarter_responseST9, fourth_quarter_responseST9, eigth_quarter_responseST9, twelvth_quarter_responseST9, twentith_quarter_responseST9, peak_value_tax9ST)
+)
+
+
+library(grid)
+
+table19_grob <- tableGrob(data_for_table_9)
+table29_grob <- tableGrob(data_for_table_9ST)
+title19 <- textGrob("Response of GDP components to tax shock DT", gp = gpar(fontsize = 14, fontface = "bold"))
+title29 <- textGrob("Response of GDP components to tax shock ST", gp = gpar(fontsize = 14, fontface = "bold"))
+grid.arrange(title19, table19_grob, 
+             title29, table29_grob, 
+             ncol = 1)
+#spending shock DT
+# Extract the 'irf' list form tax shock DT
+irf_g<- irf_spending_9$irf
+irf_matrix_g <- irf_g[[1]]
+# Access values DT
+first_q_spending_DT9<- irf_matrix_g[1, ]
+fourth_q_spending_DT9<- irf_matrix_g[4, ]
+eigth_q_spending_DT9 <- irf_matrix_g[8, ]
+twelvth_q_spending_DT9 <- irf_matrix_g[12, ]
+twentith_q_spending_DT9 <- irf_matrix_g[20, ]
+peak_value_spending9DT<-apply(irf_matrix_g, 2, max)
+#Extract the 'irf' list form spending shock ST
+irf_gST<- irf_spending_9_ST$irf
+irf_matrix_gST <- irf_gST[[1]]
+# Access values ST
+first_q_spending_ST9<- irf_matrix_gST[1, ]
+fourth_q_spending_ST9<- irf_matrix_gST[4, ]
+eigth_q_spending_ST9 <- irf_matrix_gST[8, ]
+twelvth_q_spending_ST9 <- irf_matrix_gST[12, ]
+twentith_q_spending_ST9 <- irf_matrix_gST[20, ]
+peak_value_spending9ST<-apply(irf_matrix_gST, 2, max)
+
+data_spending_9DT <- data.frame(
+  Quarter = c("1° Quarter", "4° Quarter", "8° Quarter", "12° Quarter", "20° Quarter", "The peak"),
+  Effect =rbind(first_q_spending_DT9, fourth_q_spending_DT9, eigth_q_spending_DT9, twelvth_q_spending_DT9, twentith_quarter_responseDT9, peak_value_spending9DT)
+)
+
+data_spending_9ST<- data.frame(
+  Quarter = c("1° Quarter", "4° Quarter", "8° Quarter", "12° Quarter", "20° Quarter", "The peak"),
+  Effect =rbind(first_q_spending_ST9, fourth_q_spending_ST9, eigth_q_spending_ST9, twelvth_q_spending_ST9, twentith_q_spending_ST9, peak_value_spending9ST)
+)
+
+
+library(grid)
+
+table39_grob <- tableGrob(data_spending_9DT)
+table49_grob <- tableGrob(data_spending_9ST)
+title39 <- textGrob("Response of GDP components to spending shock DT", gp = gpar(fontsize = 14, fontface = "bold"))
+title49 <- textGrob("Response of GDP components to spending shock ST", gp = gpar(fontsize = 14, fontface = "bold"))
+grid.arrange(title39, table39_grob, 
+             title49, table49_grob, 
+             ncol = 1)
+
+```
+
+
+```{r,fig.width=15, fig.height=8}
+grid.arrange(title19, table19_grob, 
+             title29, table29_grob, 
+             ncol = 1)
+
+grid.arrange(title39, table39_grob, 
+             title49, table49_grob, 
+             ncol = 1)
+```
+
+## CONCLUSIONS
+
+The key findings of this study are dynamic effects of fiscal policy and tax shocks. 
+The study successfully identifies and measures the impact of government spending and tax shocks on economic output. Using institutional information about tax and transfer systems along with the timing of tax collections, the analysis accurately isolates fiscal shocks from automatic fiscal responses to economic activity.
+
+The results indicate that tax shocks have a significant impact on economic output. The exclusion of different decades (1979, 1989, 1999, 2009, 2019) reveals that the stability of the model varies, with the highest responses observed when excluding the 2009 decade. This suggests that the economic conditions and policies of the 2000s had a substantial impact on the stability of the tax shock responses.
+
+The analysis of spending shocks, instead, shows that they also have a significant effect on output. The highest response is observed when the 1989 decade is excluded, highlighting the importance of the 1980s in influencing the model's stability.
+Considering the model consistency we can state that both Dynamic Transformation (DT) and Structural Transformation (ST) models show consistent patterns in their responses to fiscal shocks. However, DT generally exhibits higher maximum responses compared to ST, indicating a greater sensitivity to fiscal policy changes.
+
+The study includes robustness checks and discusses anticipated fiscal policies, such as those related to the COVID-19 pandemic and the 2008 financial crisis. These events are analyzed separately to understand their unique impacts on economic output.
+The main implications of this study are that the findings underscore the importance of considering specific time periods and major economic events when evaluating the impacts of fiscal policy. The economic conditions and policies of certain decades can significantly influence the stability and magnitude of fiscal shock responses.
+Policymakers should be aware of the varying impacts of tax and spending shocks over different periods and adjust their strategies accordingly to achieve desired economic outcomes.
+
+Additional studies could extend this analysis to other countries or regions to compare the dynamic effects of fiscal policy across different economic environments.
+Investigating the long-term impacts of fiscal shocks beyond the sample period could provide deeper insights into the sustainability of fiscal policies.
+Policymakers should consider the historical context and the specific economic conditions of different periods when designing fiscal policies. Understanding the past impacts of fiscal shocks can help in crafting more effective and stable economic policies.
+
+At the end of this replication study, we can confirm the crucial impact of fiscal policy on economic output. By utilizing a structural VAR approach alongside event study techniques, we have developed a strong framework for identifying and measuring the dynamic effects of fiscal shocks. The findings emphasize the necessity of taking historical and economic contexts into account when designing and implementing policies. This careful consideration is essential for ensuring the effectiveness of fiscal interventions and achieving targeted economic goals.
+
+
+## REFERENCES
+
+-Price, R., T. Dang and J. Botev (2015), "Adjusting fiscal balances for the business cycle: New tax and expenditure elasticity estimates for OECD countries", OECD Economics Department Working Papers, No. 1275, OECD Publishing, Paris, https://doi.org/10.1787/5jrp1g3282d7-en.
+
+-Blanchard o., Perotti R.(1999), "An Empirical Characterization of the Dynamic Effects
+of Changes in Government Spending and Taxes on Output", NBER Working Paper, No 7269
+
+-Federal Reserve Bank of St. Louis. (2024). Economic Data. https://fred.stlouisfed.org/
+
+
